@@ -1,4 +1,3 @@
-
 import streamlit as st
 import torch
 import torch.nn as nn
@@ -10,7 +9,7 @@ from torchvision.models import MobileNet_V2_Weights
 from PIL import Image
 import time
 from datetime import datetime
-from streamlit_option_menu import option_menu
+import io
 
 # ── Page Configuration ──
 st.set_page_config(
@@ -76,6 +75,15 @@ st.markdown("""
         box-shadow: 0 4px 15px rgba(0, 168, 107, 0.3);
     }
     
+    .error-box {
+        background: linear-gradient(135deg, #ff6b6b, #c0392b);
+        border-radius: 15px;
+        padding: 20px;
+        text-align: center;
+        color: white;
+        box-shadow: 0 4px 15px rgba(192, 57, 43, 0.3);
+    }
+    
     /* Metrics */
     .metric-card {
         background: rgba(255, 255, 255, 0.05);
@@ -111,6 +119,14 @@ st.markdown("""
         transform: translateX(5px);
     }
     
+    .history-item-error {
+        background: rgba(255, 0, 0, 0.05);
+        border-radius: 8px;
+        padding: 10px 15px;
+        margin: 5px 0;
+        border-left: 3px solid #ff6b6b;
+    }
+    
     /* Buttons */
     .stButton > button {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -141,6 +157,16 @@ st.markdown("""
         border-color: #667eea;
         background: rgba(102, 126, 234, 0.05);
     }
+    
+    /* Camera button */
+    .camera-btn {
+        background: linear-gradient(135deg, #00b894, #00a86b) !important;
+    }
+    
+    .camera-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 20px rgba(0, 168, 107, 0.4);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -161,6 +187,8 @@ if "total_straight" not in st.session_state:
     st.session_state.total_straight = 0
 if "total_predictions" not in st.session_state:
     st.session_state.total_predictions = 0
+if "total_errors" not in st.session_state:
+    st.session_state.total_errors = 0
 
 # ── Load Model ──
 @st.cache_resource
@@ -195,47 +223,118 @@ transform = transforms.Compose([
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
 
+# ── Input Validation Function ──
+def validate_road_image(image):
+    """
+    Validate if the image contains a road/highway scene.
+    Returns: (is_valid, reason)
+    """
+    # Convert to numpy for analysis
+    img_array = np.array(image)
+    
+    # Check 1: Image dimensions (too small images are likely invalid)
+    if img_array.shape[0] < 50 or img_array.shape[1] < 50:
+        return False, "Image is too small. Please upload a larger image."
+    
+    # Check 2: Check for road-like colors (brown, gray, white)
+    # Convert to HSV for better color analysis
+    from colorsys import rgb_to_hsv
+    
+    # Sample pixels to check colors
+    h, w = img_array.shape[:2]
+    sample_size = min(1000, h * w // 10)
+    sample_indices = np.random.choice(h * w, sample_size, replace=False)
+    
+    road_colors = 0
+    for idx in sample_indices:
+        r, c = divmod(idx, w)
+        if r < h and c < w:
+            pixel = img_array[r, c]
+            # Check if pixel is gray/brown/white (road-like colors)
+            if len(pixel) >= 3:
+                r_val, g_val, b_val = pixel[:3]
+                # Grayscale check
+                if abs(r_val - g_val) < 30 and abs(g_val - b_val) < 30 and abs(r_val - b_val) < 30:
+                    road_colors += 1
+                # Brown/beige check
+                elif r_val > 100 and g_val > 80 and b_val < 100:
+                    road_colors += 1
+                # White/light gray
+                elif r_val > 150 and g_val > 150 and b_val > 150:
+                    road_colors += 1
+    
+    road_ratio = road_colors / sample_size
+    
+    if road_ratio < 0.05:
+        return False, "No road-like colors detected. Please upload a highway or road image."
+    
+    return True, "Valid road image"
+
+# ── Prediction Function ──
+def predict_image(img, source="upload"):
+    """
+    Predict image class with validation.
+    Returns: (result_dict, error_message)
+    """
+    # Validate input
+    is_valid, reason = validate_road_image(img)
+    if not is_valid:
+        return None, reason
+    
+    # Predict
+    start = time.time()
+    tensor = transform(img).unsqueeze(0).to(DEVICE)
+    
+    with torch.no_grad():
+        output = model(tensor)
+        probs = torch.softmax(output, dim=1)[0]
+        pred = probs.argmax().item()
+    
+    elapsed = (time.time() - start) * 1000
+    predicted_class = CLASSES[pred]
+    confidence = probs[pred].item() * 100
+    
+    result = {
+        "prediction": predicted_class,
+        "confidence": confidence,
+        "elapsed": elapsed,
+        "sharp_prob": probs[0].item() * 100,
+        "straight_prob": probs[1].item() * 100,
+        "source": source,
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "date": datetime.now().strftime("%Y-%m-%d")
+    }
+    
+    return result, None
+
 # ── Sidebar Navigation ──
 with st.sidebar:
     st.markdown("# 🛣️ Highway Bend")
     st.markdown("### Classifier")
     st.markdown("---")
     
-    selected = option_menu(
-        menu_title=None,
-        options=["Home", "Dashboard", "History", "About"],
-        icons=["house", "bar-chart", "clock-history", "info-circle"],
-        menu_icon="cast",
-        default_index=0,
-        styles={
-            "container": {"padding": "0!important", "background-color": "transparent"},
-            "icon": {"color": "#667eea", "font-size": "20px"},
-            "nav-link": {"color": "#a8b5d9", "font-size": "16px", "text-align": "left", "margin": "0px"},
-            "nav-link-selected": {"background-color": "rgba(102, 126, 234, 0.2)"},
-        }
+    # Simple navigation with buttons
+    page = st.radio(
+        "Navigate",
+        ["🏠 Home", "📊 Dashboard", "🕐 History", "ℹ️ About"],
+        index=0
     )
     
     st.markdown("---")
     
     # Sidebar stats
     st.markdown("### 📊 Statistics")
-    cols = st.columns(2)
-    with cols[0]:
-        st.markdown(f"**Total**\n{st.session_state.total_predictions}")
-    with cols[1]:
-        st.markdown(f"**Sharp**\n{st.session_state.total_sharp}")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Total", st.session_state.total_predictions, delta=None)
+    with col2:
+        st.metric("Sharp", st.session_state.total_sharp, delta=None)
     
-    st.markdown(f"**Straight**\n{st.session_state.total_straight}")
-    
-    if st.session_state.total_predictions > 0:
-        sharp_pct = st.session_state.total_sharp / st.session_state.total_predictions * 100
-        straight_pct = st.session_state.total_straight / st.session_state.total_predictions * 100
-        
-        # Mini pie chart
-        fig, ax = plt.subplots(figsize=(2, 2))
-        ax.pie([sharp_pct, straight_pct], colors=["#ff6b6b", "#00b894"], startangle=90)
-        ax.axis('equal')
-        st.pyplot(fig)
+    col3, col4 = st.columns(2)
+    with col3:
+        st.metric("Straight", st.session_state.total_straight, delta=None)
+    with col4:
+        st.metric("⚠️ Errors", st.session_state.total_errors, delta=None)
     
     st.markdown("---")
     if st.button("🗑️ Clear History", use_container_width=True):
@@ -243,108 +342,152 @@ with st.sidebar:
         st.session_state.total_sharp = 0
         st.session_state.total_straight = 0
         st.session_state.total_predictions = 0
+        st.session_state.total_errors = 0
         st.rerun()
 
-# ── Main Content ──
-if selected == "Home":
+# ── Page Content ──
+if page == "🏠 Home":
     st.markdown('<div class="main-header">🛣️ Highway Bend Classifier</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-header">Deep Learning Road Safety System • 90.2% Accuracy</div>', unsafe_allow_html=True)
+    
+    # Input method selection
+    input_method = st.radio(
+        "Select input method:",
+        ["📤 Upload Image", "📸 Take Photo"],
+        horizontal=True
+    )
     
     col1, col2 = st.columns([1, 1])
     
     with col1:
-        st.markdown("### 📤 Upload Image")
-        uploaded = st.file_uploader("", type=["jpg", "jpeg", "png"])
+        st.markdown("### 📤 Input")
         
-        if uploaded:
-            img = Image.open(uploaded).convert("RGB")
-            st.image(img, caption="Uploaded Highway Image", use_column_width=True)
+        uploaded = None
+        camera_image = None
+        
+        if input_method == "📤 Upload Image":
+            uploaded = st.file_uploader(
+                "Upload a highway image",
+                type=["jpg", "jpeg", "png", "bmp", "webp"],
+                help="Upload clear images of highways, roads, or streets"
+            )
             
+            if uploaded:
+                img = Image.open(uploaded).convert("RGB")
+                st.image(img, caption="Uploaded Image", use_column_width=True)
+                source = "upload"
+        
+        else:  # Camera
+            camera_image = st.camera_input("Take a photo of the road ahead")
+            
+            if camera_image:
+                img = Image.open(camera_image).convert("RGB")
+                st.image(img, caption="Captured Image", use_column_width=True)
+                source = "camera"
+        
+        # Classify button
+        if uploaded or camera_image:
             if st.button("🔍 Classify Image", use_container_width=True, type="primary"):
                 with st.spinner("🔄 Analyzing image..."):
-                    start = time.time()
-                    tensor = transform(img).unsqueeze(0).to(DEVICE)
-                    
-                    with torch.no_grad():
-                        output = model(tensor)
-                        probs = torch.softmax(output, dim=1)[0]
-                        pred = probs.argmax().item()
-                    
-                    elapsed = (time.time() - start) * 1000
-                    predicted_class = CLASSES[pred]
-                    confidence = probs[pred].item() * 100
+                    result, error = predict_image(img, source)
                 
-                # ── Save to history ──
-                st.session_state.history.append({
-                    "time": datetime.now().strftime("%H:%M:%S"),
-                    "date": datetime.now().strftime("%Y-%m-%d"),
-                    "prediction": predicted_class,
-                    "confidence": confidence,
-                    "elapsed": elapsed,
-                    "sharp_prob": probs[0].item() * 100,
-                    "straight_prob": probs[1].item() * 100
-                })
-                st.session_state.total_predictions += 1
-                if predicted_class == "sharp":
-                    st.session_state.total_sharp += 1
-                else:
-                    st.session_state.total_straight += 1
-                
-                # ── Display Result ──
-                if predicted_class == "sharp":
+                if error:
+                    # ── Invalid Input ──
+                    st.session_state.total_errors += 1
+                    st.session_state.history.append({
+                        "type": "error",
+                        "time": datetime.now().strftime("%H:%M:%S"),
+                        "date": datetime.now().strftime("%Y-%m-%d"),
+                        "error": error,
+                        "source": source
+                    })
+                    
                     st.markdown(f"""
-                    <div class="sharp-box">
-                        <h1 style="margin:0;">🔴 SHARP BEND DETECTED</h1>
-                        <p style="font-size:1.2rem; margin:10px 0;">Confidence: {confidence:.1f}%</p>
-                        <p style="opacity:0.8;">⏱️ Processed in {elapsed:.0f}ms</p>
+                    <div class="error-box">
+                        <h1 style="margin:0;">❌ INVALID IMAGE</h1>
+                        <p style="font-size:1.1rem; margin:10px 0;">{error}</p>
+                        <p style="opacity:0.8;">Please upload a clear image of a road or highway</p>
                     </div>
                     """, unsafe_allow_html=True)
                     
                     st.warning("""
-                    ⚠️ **Driving Advice — Sharp Bend**
-                    - Reduce speed immediately
-                    - Stay in your lane
-                    - Watch for oncoming traffic
-                    - Do not overtake
-                    - Use headlights in low visibility
+                    📸 **Tips for better results:**
+                    - Take a photo of the road ahead
+                    - Ensure good lighting
+                    - Frame the road clearly
+                    - Avoid photos with people or buildings
                     """)
-                else:
-                    st.markdown(f"""
-                    <div class="straight-box">
-                        <h1 style="margin:0;">🟢 STRAIGHT ROAD</h1>
-                        <p style="font-size:1.2rem; margin:10px 0;">Confidence: {confidence:.1f}%</p>
-                        <p style="opacity:0.8;">⏱️ Processed in {elapsed:.0f}ms</p>
-                    </div>
-                    """, unsafe_allow_html=True)
                     
-                    st.success("""
-                    ✅ **Driving Advice — Straight Road**
-                    - Normal driving conditions
-                    - Maintain safe following distance
-                    - Stay alert and focused
-                    - Observe speed limits
-                    """)
-                
-                # ── Confidence Chart ──
-                st.markdown("### 📊 Confidence Analysis")
-                fig, ax = plt.subplots(figsize=(10, 4))
-                fig.patch.set_facecolor('transparent')
-                ax.set_facecolor('transparent')
-                
-                bars = ax.barh(CLASS_NAMES, [probs[0].item()*100, probs[1].item()*100],
-                              color=["#ff6b6b", "#00b894"], height=0.5)
-                
-                for bar, val in zip(bars, [probs[0].item()*100, probs[1].item()*100]):
-                    ax.text(min(val + 2, 90), bar.get_y() + bar.get_height()/2,
-                            f"{val:.1f}%", va='center', fontsize=14, fontweight='bold', color='white')
-                
-                ax.set_xlim(0, 100)
-                ax.set_xlabel("Confidence (%)", color='white', fontsize=12)
-                ax.tick_params(colors='white')
-                for spine in ax.spines.values():
-                    spine.set_color('white')
-                plt.tight_layout()
-                st.pyplot(fig)
+                else:
+                    # ── Valid Prediction ──
+                    st.session_state.total_predictions += 1
+                    if result["prediction"] == "sharp":
+                        st.session_state.total_sharp += 1
+                    else:
+                        st.session_state.total_straight += 1
+                    
+                    st.session_state.history.append({
+                        "type": "prediction",
+                        **result
+                    })
+                    
+                    # Display result
+                    if result["prediction"] == "sharp":
+                        st.markdown(f"""
+                        <div class="sharp-box">
+                            <h1 style="margin:0;">🔴 SHARP BEND DETECTED</h1>
+                            <p style="font-size:1.2rem; margin:10px 0;">Confidence: {result['confidence']:.1f}%</p>
+                            <p style="opacity:0.8;">⏱️ Processed in {result['elapsed']:.0f}ms • 📸 {source.title()}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        st.warning("""
+                        ⚠️ **Driving Advice — Sharp Bend**
+                        - Reduce speed immediately
+                        - Stay in your lane
+                        - Watch for oncoming traffic
+                        - Do not overtake
+                        - Use headlights in low visibility
+                        """)
+                    else:
+                        st.markdown(f"""
+                        <div class="straight-box">
+                            <h1 style="margin:0;">🟢 STRAIGHT ROAD</h1>
+                            <p style="font-size:1.2rem; margin:10px 0;">Confidence: {result['confidence']:.1f}%</p>
+                            <p style="opacity:0.8;">⏱️ Processed in {result['elapsed']:.0f}ms • 📸 {source.title()}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        st.success("""
+                        ✅ **Driving Advice — Straight Road**
+                        - Normal driving conditions
+                        - Maintain safe following distance
+                        - Stay alert and focused
+                        - Observe speed limits
+                        """)
+                    
+                    # ── Confidence Chart ──
+                    st.markdown("### 📊 Confidence Analysis")
+                    fig, ax = plt.subplots(figsize=(10, 4))
+                    fig.patch.set_facecolor('transparent')
+                    ax.set_facecolor('transparent')
+                    
+                    bars = ax.barh(CLASS_NAMES, 
+                                  [result['sharp_prob'], result['straight_prob']],
+                                  color=["#ff6b6b", "#00b894"], height=0.5)
+                    
+                    for bar, val in zip(bars, [result['sharp_prob'], result['straight_prob']]):
+                        ax.text(min(val + 2, 90), bar.get_y() + bar.get_height()/2,
+                                f"{val:.1f}%", va='center', fontsize=14, 
+                                fontweight='bold', color='white')
+                    
+                    ax.set_xlim(0, 100)
+                    ax.set_xlabel("Confidence (%)", color='white', fontsize=12)
+                    ax.tick_params(colors='white')
+                    for spine in ax.spines.values():
+                        spine.set_color('white')
+                    plt.tight_layout()
+                    st.pyplot(fig)
     
     with col2:
         st.markdown("### 📈 Performance Summary")
@@ -359,9 +502,11 @@ if selected == "Home":
             </div>
             """, unsafe_allow_html=True)
         with cols[1]:
-            st.markdown("""
+            avg_conf = np.mean([h["confidence"] for h in st.session_state.history 
+                              if h.get("type") == "prediction"]) if st.session_state.history else 0
+            st.markdown(f"""
             <div class="metric-card">
-                <div class="metric-value">94.1%</div>
+                <div class="metric-value">{avg_conf:.1f}%</div>
                 <div class="metric-label">Avg Confidence</div>
             </div>
             """, unsafe_allow_html=True)
@@ -378,41 +523,53 @@ if selected == "Home":
         df = pd.DataFrame(metrics_data)
         st.dataframe(df, hide_index=True, use_container_width=True)
         
-        st.markdown("### 📈 Prediction History")
+        st.markdown("### 📈 Recent Activity")
         if st.session_state.history:
-            recent = st.session_state.history[-5:]
+            recent = st.session_state.history[-3:]
             for item in reversed(recent):
-                emoji = CLASS_EMOJIS[item["prediction"]]
-                color = "#ff6b6b" if item["prediction"] == "sharp" else "#00b894"
-                st.markdown(f"""
-                <div class="history-item" style="border-left-color: {color};">
-                    <b>{emoji} {item['prediction'].upper()}</b>
-                    <span style="float:right; color:#a8b5d9;">{item['confidence']:.1f}%</span>
-                    <br>
-                    <small style="color:#a8b5d9;">🕐 {item['time']} • ⏱️ {item['elapsed']:.0f}ms</small>
-                </div>
-                """, unsafe_allow_html=True)
+                if item.get("type") == "error":
+                    st.markdown(f"""
+                    <div class="history-item-error">
+                        <b>❌ Invalid Input</b>
+                        <span style="float:right; color:#a8b5d9;">{item['time']}</span>
+                        <br>
+                        <small style="color:#a8b5d9;">{item['error'][:50]}...</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    emoji = CLASS_EMOJIS[item["prediction"]]
+                    color = "#ff6b6b" if item["prediction"] == "sharp" else "#00b894"
+                    st.markdown(f"""
+                    <div class="history-item" style="border-left-color: {color};">
+                        <b>{emoji} {item['prediction'].upper()}</b>
+                        <span style="float:right; color:#a8b5d9;">{item['confidence']:.1f}%</span>
+                        <br>
+                        <small style="color:#a8b5d9;">🕐 {item['time']} • 📸 {item.get('source', 'upload').title()}</small>
+                    </div>
+                    """, unsafe_allow_html=True)
         else:
-            st.info("No predictions yet. Upload an image to get started!")
+            st.info("No activity yet. Upload or capture an image!")
 
-elif selected == "Dashboard":
+elif page == "📊 Dashboard":
     st.markdown('<div class="main-header">📊 Analytics Dashboard</div>', unsafe_allow_html=True)
     
-    if st.session_state.total_predictions == 0:
+    if st.session_state.total_predictions == 0 and st.session_state.total_errors == 0:
         st.info("📊 No data yet. Make some predictions to see analytics!")
         st.stop()
     
     # Overview metrics
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
-        st.metric("Total Predictions", st.session_state.total_predictions)
+        st.metric("Total", st.session_state.total_predictions + st.session_state.total_errors)
     with col2:
-        st.metric("Sharp Bends", st.session_state.total_sharp)
+        st.metric("Sharp", st.session_state.total_sharp)
     with col3:
-        st.metric("Straight Roads", st.session_state.total_straight)
+        st.metric("Straight", st.session_state.total_straight)
     with col4:
-        avg_conf = np.mean([h["confidence"] for h in st.session_state.history])
-        st.metric("Avg Confidence", f"{avg_conf:.1f}%")
+        st.metric("⚠️ Errors", st.session_state.total_errors)
+    with col5:
+        error_rate = (st.session_state.total_errors / (st.session_state.total_predictions + st.session_state.total_errors) * 100) if (st.session_state.total_predictions + st.session_state.total_errors) > 0 else 0
+        st.metric("Error Rate", f"{error_rate:.1f}%")
     
     # Charts
     col1, col2 = st.columns(2)
@@ -432,72 +589,114 @@ elif selected == "Dashboard":
     
     with col2:
         st.markdown("### 📈 Confidence Trend")
-        df_history = pd.DataFrame(st.session_state.history)
-        df_history['index'] = range(1, len(df_history) + 1)
-        
-        fig, ax = plt.subplots(figsize=(10, 5))
-        colors = ['#ff6b6b' if p == 'sharp' else '#00b894' for p in df_history['prediction']]
-        ax.scatter(df_history['index'], df_history['confidence'], c=colors, s=100, alpha=0.6)
-        ax.plot(df_history['index'], df_history['confidence'], color='white', alpha=0.3)
-        ax.axhline(y=avg_conf, color='#667eea', linestyle='--', label=f'Avg: {avg_conf:.1f}%')
-        ax.set_xlabel('Prediction Number', color='white')
-        ax.set_ylabel('Confidence (%)', color='white')
-        ax.set_ylim(0, 105)
-        ax.tick_params(colors='white')
-        for spine in ax.spines.values():
-            spine.set_color('white')
-        ax.legend(facecolor='#1a1a2e', labelcolor='white')
-        plt.tight_layout()
-        st.pyplot(fig)
+        predictions = [h for h in st.session_state.history if h.get("type") == "prediction"]
+        if predictions:
+            df_history = pd.DataFrame(predictions)
+            df_history['index'] = range(1, len(df_history) + 1)
+            
+            fig, ax = plt.subplots(figsize=(10, 5))
+            colors = ['#ff6b6b' if p == 'sharp' else '#00b894' for p in df_history['prediction']]
+            ax.scatter(df_history['index'], df_history['confidence'], c=colors, s=100, alpha=0.6)
+            ax.plot(df_history['index'], df_history['confidence'], color='white', alpha=0.3)
+            avg_conf = np.mean(df_history['confidence'])
+            ax.axhline(y=avg_conf, color='#667eea', linestyle='--', label=f'Avg: {avg_conf:.1f}%')
+            ax.set_xlabel('Prediction Number', color='white')
+            ax.set_ylabel('Confidence (%)', color='white')
+            ax.set_ylim(0, 105)
+            ax.tick_params(colors='white')
+            for spine in ax.spines.values():
+                spine.set_color('white')
+            ax.legend(facecolor='#1a1a2e', labelcolor='white')
+            plt.tight_layout()
+            st.pyplot(fig)
     
     # Full history table
-    st.markdown("### 📋 Full Prediction History")
+    st.markdown("### 📋 Full History")
     if st.session_state.history:
         df_full = pd.DataFrame(st.session_state.history)
-        df_full['prediction'] = df_full['prediction'].str.upper()
-        df_full = df_full[['date', 'time', 'prediction', 'confidence', 'elapsed', 'sharp_prob', 'straight_prob']]
-        df_full.columns = ['Date', 'Time', 'Class', 'Confidence %', 'Speed (ms)', 'Sharp %', 'Straight %']
-        st.dataframe(df_full, use_container_width=True)
+        df_full_display = df_full.copy()
+        df_full_display['type'] = df_full_display.get('type', 'prediction')
+        df_full_display['Class'] = df_full_display.apply(
+            lambda x: x['prediction'].upper() if x.get('type') == 'prediction' else '❌ ERROR', 
+            axis=1
+        )
+        df_full_display['Confidence %'] = df_full_display.apply(
+            lambda x: f"{x['confidence']:.1f}%" if x.get('type') == 'prediction' else 'N/A',
+            axis=1
+        )
+        df_full_display = df_full_display[['date', 'time', 'Class', 'Confidence %']]
+        st.dataframe(df_full_display, use_container_width=True)
         
         # Download button
         csv = df_full.to_csv(index=False)
         st.download_button(
-            label="📥 Download History CSV",
+            label="📥 Download Full History CSV",
             data=csv,
             file_name="predictions_history.csv",
             mime="text/csv"
         )
 
-elif selected == "History":
+elif page == "🕐 History":
     st.markdown('<div class="main-header">🕐 Prediction History</div>', unsafe_allow_html=True)
     
     if not st.session_state.history:
-        st.info("📭 No predictions yet. Upload an image to get started!")
+        st.info("📭 No predictions yet. Upload or capture an image to get started!")
     else:
+        # Filter
+        filter_type = st.selectbox(
+            "Filter by:",
+            ["All", "Predictions Only", "Errors Only"]
+        )
+        
+        filtered_history = st.session_state.history
+        if filter_type == "Predictions Only":
+            filtered_history = [h for h in st.session_state.history if h.get("type") == "prediction"]
+        elif filter_type == "Errors Only":
+            filtered_history = [h for h in st.session_state.history if h.get("type") == "error"]
+        
         # Timeline view
-        for i, item in enumerate(reversed(st.session_state.history)):
-            emoji = CLASS_EMOJIS[item["prediction"]]
-            color = "#ff6b6b" if item["prediction"] == "sharp" else "#00b894"
-            
-            with st.container():
-                col1, col2 = st.columns([1, 3])
-                with col1:
-                    st.markdown(f"### #{st.session_state.total_predictions - i}")
-                    st.caption(item["date"])
-                with col2:
-                    st.markdown(f"""
-                    <div class="history-item" style="border-left-color: {color};">
-                        <h3 style="margin:0; color: {color};">{emoji} {item['prediction'].upper()}</h3>
-                        <p style="margin:5px 0;">
-                            Confidence: <b>{item['confidence']:.1f}%</b>
-                            • Processed: <b>{item['elapsed']:.0f}ms</b>
-                            • Time: <b>{item['time']}</b>
-                        </p>
-                        <p style="margin:5px 0; font-size:0.9rem; color:#a8b5d9;">
-                            Sharp: {item['sharp_prob']:.1f}% • Straight: {item['straight_prob']:.1f}%
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
+        for i, item in enumerate(reversed(filtered_history)):
+            if item.get("type") == "error":
+                with st.container():
+                    col1, col2 = st.columns([1, 3])
+                    with col1:
+                        st.markdown(f"### #{len(st.session_state.history) - i}")
+                        st.caption(item["date"])
+                    with col2:
+                        st.markdown(f"""
+                        <div class="history-item-error">
+                            <h3 style="margin:0; color: #ff6b6b;">❌ INVALID INPUT</h3>
+                            <p style="margin:5px 0;">
+                                Error: <b>{item['error']}</b>
+                            </p>
+                            <p style="margin:5px 0; font-size:0.9rem; color:#a8b5d9;">
+                                📸 {item.get('source', 'upload').title()} • 🕐 {item['time']}
+                            </p>
+                        </div>
+                        """, unsafe_allow_html=True)
+            else:
+                emoji = CLASS_EMOJIS[item["prediction"]]
+                color = "#ff6b6b" if item["prediction"] == "sharp" else "#00b894"
+                
+                with st.container():
+                    col1, col2 = st.columns([1, 3])
+                    with col1:
+                        st.markdown(f"### #{len(st.session_state.history) - i}")
+                        st.caption(item["date"])
+                    with col2:
+                        st.markdown(f"""
+                        <div class="history-item" style="border-left-color: {color};">
+                            <h3 style="margin:0; color: {color};">{emoji} {item['prediction'].upper()}</h3>
+                            <p style="margin:5px 0;">
+                                Confidence: <b>{item['confidence']:.1f}%</b>
+                                • Processed: <b>{item['elapsed']:.0f}ms</b>
+                                • 📸 {item.get('source', 'upload').title()}
+                            </p>
+                            <p style="margin:5px 0; font-size:0.9rem; color:#a8b5d9;">
+                                Sharp: {item['sharp_prob']:.1f}% • Straight: {item['straight_prob']:.1f}%
+                            </p>
+                        </div>
+                        """, unsafe_allow_html=True)
 
 else:  # About
     st.markdown('<div class="main-header">ℹ️ About</div>', unsafe_allow_html=True)
@@ -509,8 +708,9 @@ else:  # About
     This application uses deep learning to classify highway images as either **Sharp Bend** or **Straight Road**.
     
     ### 🎯 Key Features
-    - **Real-time Classification:** Instant predictions on uploaded images
-    - **Confidence Analysis:** Visual confidence scores for each prediction
+    - **Multiple Input Methods:** Upload images or take photos with your camera
+    - **Smart Validation:** Automatically detects if the image contains a road
+    - **Real-time Classification:** Instant predictions with confidence scores
     - **History Tracking:** Full prediction history with timestamps
     - **Analytics Dashboard:** View trends and statistics
     
@@ -524,11 +724,21 @@ else:  # About
     | Straight Precision | 89% |
     | Straight Recall | 92% |
     
+    ### 📸 Input Methods
+    1. **Upload Image:** Upload a saved photo from your device
+    2. **Take Photo:** Use your camera to capture a real-time image
+    
+    ### ✅ Validation Features
+    - Checks if the image contains road-like colors
+    - Ensures minimum image quality
+    - Validates image dimensions
+    - Provides clear error messages
+    
     ### 🛠️ Technical Stack
     - **Framework:** PyTorch
     - **Deployment:** Streamlit Cloud
     - **UI:** Custom CSS + Streamlit
-    - **Visualization:** Matplotlib, Plotly
+    - **Computer Vision:** MobileNetV2
     
     ### 📝 Important Note
     This is a research prototype. Always rely on official traffic signs and real-time conditions while driving.
