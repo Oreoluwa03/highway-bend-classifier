@@ -9,7 +9,6 @@ from torchvision.models import MobileNet_V2_Weights
 from PIL import Image
 import time
 from datetime import datetime
-import io
 
 # ── Page Configuration ──
 st.set_page_config(
@@ -157,16 +156,6 @@ st.markdown("""
         border-color: #667eea;
         background: rgba(102, 126, 234, 0.05);
     }
-    
-    /* Camera button */
-    .camera-btn {
-        background: linear-gradient(135deg, #00b894, #00a86b) !important;
-    }
-    
-    .camera-btn:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 20px rgba(0, 168, 107, 0.4);
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -237,9 +226,6 @@ def validate_road_image(image):
         return False, "Image is too small. Please upload a larger image."
     
     # Check 2: Check for road-like colors (brown, gray, white)
-    # Convert to HSV for better color analysis
-    from colorsys import rgb_to_hsv
-    
     # Sample pixels to check colors
     h, w = img_array.shape[:2]
     sample_size = min(1000, h * w // 10)
@@ -466,11 +452,12 @@ if page == "🏠 Home":
                         - Observe speed limits
                         """)
                     
-                    # ── Confidence Chart ──
+                    # ── Confidence Chart (FIXED) ──
                     st.markdown("### 📊 Confidence Analysis")
                     fig, ax = plt.subplots(figsize=(10, 4))
-                    fig.patch.set_facecolor('transparent')
-                    ax.set_facecolor('transparent')
+                    # Use dark background instead of transparent
+                    fig.patch.set_facecolor('#1a1a2e')
+                    ax.set_facecolor('#1a1a2e')
                     
                     bars = ax.barh(CLASS_NAMES, 
                                   [result['sharp_prob'], result['straight_prob']],
@@ -577,6 +564,9 @@ elif page == "📊 Dashboard":
     with col1:
         st.markdown("### 📊 Class Distribution")
         fig, ax = plt.subplots(figsize=(8, 6))
+        # Use dark background
+        fig.patch.set_facecolor('#1a1a2e')
+        ax.set_facecolor('#1a1a2e')
         ax.pie([st.session_state.total_sharp, st.session_state.total_straight],
                labels=["Sharp Bend", "Straight Road"],
                colors=["#ff6b6b", "#00b894"],
@@ -595,6 +585,9 @@ elif page == "📊 Dashboard":
             df_history['index'] = range(1, len(df_history) + 1)
             
             fig, ax = plt.subplots(figsize=(10, 5))
+            # Use dark background
+            fig.patch.set_facecolor('#1a1a2e')
+            ax.set_facecolor('#1a1a2e')
             colors = ['#ff6b6b' if p == 'sharp' else '#00b894' for p in df_history['prediction']]
             ax.scatter(df_history['index'], df_history['confidence'], c=colors, s=100, alpha=0.6)
             ax.plot(df_history['index'], df_history['confidence'], color='white', alpha=0.3)
