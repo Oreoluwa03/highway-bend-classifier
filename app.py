@@ -51,21 +51,6 @@ st.markdown("""
         text-transform: uppercase;
     }
     
-    .card {
-        background: rgba(255, 255, 255, 0.03);
-        backdrop-filter: blur(10px);
-        border-radius: 15px;
-        padding: 20px;
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-        margin: 10px 0;
-        transition: all 0.3s ease;
-    }
-    
-    .card:hover {
-        border-color: rgba(102, 126, 234, 0.2);
-    }
-    
     .sharp-box {
         background: linear-gradient(135deg, rgba(255, 50, 50, 0.15), rgba(200, 0, 0, 0.05));
         border: 2px solid rgba(255, 50, 50, 0.3);
@@ -207,20 +192,6 @@ st.markdown("""
     .stButton > button:hover {
         transform: translateY(-2px);
         box-shadow: 0 4px 30px rgba(102, 126, 234, 0.3);
-    }
-    
-    .upload-area {
-        border: 1px dashed rgba(102, 126, 234, 0.2);
-        border-radius: 15px;
-        padding: 30px;
-        text-align: center;
-        background: rgba(255, 255, 255, 0.02);
-        transition: all 0.3s ease;
-    }
-    
-    .upload-area:hover {
-        border-color: rgba(102, 126, 234, 0.4);
-        background: rgba(255, 255, 255, 0.04);
     }
     
     .sidebar-title {
@@ -598,7 +569,7 @@ if page == "🏠 Home":
                         - Observe speed limits
                         """)
                     
-                    # Confidence Chart - FIXED
+                    # ── Confidence Chart (FIXED) ──
                     st.markdown("### 📊 Confidence Analysis")
                     fig, ax = plt.subplots(figsize=(10, 4))
                     fig.patch.set_facecolor('#0a0a0f')
@@ -614,10 +585,10 @@ if page == "🏠 Home":
                                 fontweight='bold', color='white')
                     
                     ax.set_xlim(0, 100)
-                    ax.set_xlabel("Confidence (%)", fontsize=12, color='rgba(255,255,255,0.3)')
-                    ax.tick_params(colors='rgba(255,255,255,0.3)')
+                    ax.set_xlabel("Confidence (%)", fontsize=12, color='gray')
+                    ax.tick_params(colors='gray')
                     for spine in ax.spines.values():
-                        spine.set_color('rgba(255,255,255,0.1)')
+                        spine.set_color('gray')
                     plt.tight_layout()
                     st.pyplot(fig)
     
@@ -732,13 +703,13 @@ elif page == "📊 Dashboard":
             ax.plot(df_history['index'], df_history['confidence'], color='white', alpha=0.3)
             avg_conf = np.mean(df_history['confidence'])
             ax.axhline(y=avg_conf, color='#667eea', linestyle='--', label=f'Avg: {avg_conf:.1f}%')
-            ax.set_xlabel('Prediction Number', color='rgba(255,255,255,0.3)')
-            ax.set_ylabel('Confidence (%)', color='rgba(255,255,255,0.3)')
+            ax.set_xlabel('Prediction Number', color='gray')
+            ax.set_ylabel('Confidence (%)', color='gray')
             ax.set_ylim(0, 105)
-            ax.tick_params(colors='rgba(255,255,255,0.3)')
+            ax.tick_params(colors='gray')
             for spine in ax.spines.values():
-                spine.set_color('rgba(255,255,255,0.1)')
-            ax.legend(facecolor='#0a0a0f', labelcolor='rgba(255,255,255,0.5)')
+                spine.set_color('gray')
+            ax.legend(facecolor='#0a0a0f', labelcolor='white')
             plt.tight_layout()
             st.pyplot(fig)
     
