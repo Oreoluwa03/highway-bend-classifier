@@ -12,8 +12,6 @@ from datetime import datetime
 import cv2
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
 import av
-import plotly.graph_objects as go
-import plotly.express as px
 
 # ── Page Configuration ──
 st.set_page_config(
@@ -93,35 +91,12 @@ st.markdown("""
         100% { opacity: 1; }
     }
     
-    /* ── Telemetry Numbers ── */
-    .telemetry-value {
-        color: #00d4ff;
-        font-size: 1.8rem;
-        font-weight: 700;
-        font-family: 'Consolas', monospace;
-        text-shadow: 0 0 20px rgba(0, 180, 255, 0.15);
-    }
-    
-    .telemetry-label {
-        color: rgba(0, 180, 255, 0.5);
-        font-size: 0.6rem;
-        text-transform: uppercase;
-        letter-spacing: 2px;
-        font-family: 'Consolas', monospace;
-    }
-    
-    .telemetry-unit {
-        color: rgba(0, 180, 255, 0.3);
-        font-size: 0.7rem;
-        font-family: 'Consolas', monospace;
-    }
-    
     /* ── Detection Result Box ── */
     .result-sharp {
         background: linear-gradient(135deg, rgba(255, 50, 50, 0.15), rgba(200, 0, 0, 0.05));
         border: 2px solid rgba(255, 50, 50, 0.4);
         border-radius: 12px;
-        padding: 20px;
+        padding: 25px;
         text-align: center;
         box-shadow: 0 0 40px rgba(255, 50, 50, 0.1);
     }
@@ -130,14 +105,14 @@ st.markdown("""
         background: linear-gradient(135deg, rgba(0, 255, 136, 0.1), rgba(0, 200, 100, 0.05));
         border: 2px solid rgba(0, 255, 136, 0.3);
         border-radius: 12px;
-        padding: 20px;
+        padding: 25px;
         text-align: center;
         box-shadow: 0 0 40px rgba(0, 255, 136, 0.05);
     }
     
     .result-sharp-text {
         color: #ff4444;
-        font-size: 2rem;
+        font-size: 2.2rem;
         font-weight: 700;
         letter-spacing: 3px;
         font-family: 'Consolas', monospace;
@@ -146,7 +121,7 @@ st.markdown("""
     
     .result-straight-text {
         color: #00ff88;
-        font-size: 2rem;
+        font-size: 2.2rem;
         font-weight: 700;
         letter-spacing: 3px;
         font-family: 'Consolas', monospace;
@@ -155,9 +130,17 @@ st.markdown("""
     
     .result-confidence {
         color: rgba(255, 255, 255, 0.6);
-        font-size: 0.9rem;
+        font-size: 1rem;
         letter-spacing: 1px;
         font-family: 'Consolas', monospace;
+        margin-top: 8px;
+    }
+    
+    .result-meta {
+        color: rgba(255, 255, 255, 0.25);
+        font-size: 0.7rem;
+        font-family: 'Consolas', monospace;
+        margin-top: 5px;
     }
     
     /* ── Metrics Cards ── */
@@ -188,22 +171,6 @@ st.markdown("""
         text-transform: uppercase;
         letter-spacing: 2px;
         font-family: 'Consolas', monospace;
-    }
-    
-    /* ── Route Analysis ── */
-    .route-bar {
-        background: rgba(0, 180, 255, 0.05);
-        border-radius: 20px;
-        height: 6px;
-        margin: 10px 0;
-        overflow: hidden;
-    }
-    
-    .route-bar-fill {
-        height: 100%;
-        background: linear-gradient(90deg, #00ff88, #00d4ff, #ff4444);
-        border-radius: 20px;
-        transition: width 0.5s ease;
     }
     
     /* ── Bend History ── */
@@ -289,6 +256,26 @@ st.markdown("""
     .diagnostic-error {
         color: #ff4444;
     }
+    
+    /* ── Advice Box ── */
+    .advice-box {
+        background: rgba(0, 180, 255, 0.03);
+        border-radius: 10px;
+        padding: 15px;
+        margin-top: 15px;
+        font-family: 'Consolas', monospace;
+        border: 1px solid rgba(0, 180, 255, 0.08);
+    }
+    
+    .advice-box-sharp {
+        border-color: rgba(255, 68, 68, 0.2);
+        background: rgba(255, 68, 68, 0.05);
+    }
+    
+    .advice-box-straight {
+        border-color: rgba(0, 255, 136, 0.15);
+        background: rgba(0, 255, 136, 0.03);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -335,8 +322,9 @@ def load_model():
 
 try:
     model = load_model()
-except:
-    st.error("⚠️ Model file not found. Please ensure model.pth is in the app directory.")
+except Exception as e:
+    st.error(f"⚠️ Model loading error: {e}")
+    st.info("Please ensure model.pth is in the app directory.")
     st.stop()
 
 # ── Transform ──
@@ -446,17 +434,20 @@ class VideoProcessor(VideoProcessorBase):
                     self.frame_count = 0
                     self.start_time = time.time()
                 
-                # HUD overlay
+                # HUD overlay on video
                 label = f"{self.classes[pred].upper()}"
                 color = (0, 255, 136) if self.classes[pred] == "straight" else (68, 68, 255)
-                cv2.rectangle(img, (10, 10), (250, 100), (0, 0, 0, 180), -1)
+                
+                # Semi-transparent background for text
+                cv2.rectangle(img, (10, 10), (300, 120), (0, 0, 0, 180), -1)
+                
                 cv2.putText(img, "DETECTION", (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 180, 255), 1)
                 cv2.putText(img, f"{label} {confidence:.1f}%", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
                 cv2.putText(img, f"FPS: {self.fps}", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (100, 200, 255), 1)
                 
                 # Progress bar
                 bar_x, bar_y = 20, 115
-                bar_w, bar_h = 200, 6
+                bar_w, bar_h = 260, 6
                 sharp_w = int(bar_w * (probs[0].item()))
                 cv2.rectangle(img, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (40, 40, 40), -1)
                 cv2.rectangle(img, (bar_x, bar_y), (bar_x + sharp_w, bar_y + bar_h), (68, 68, 255), -1)
@@ -470,24 +461,19 @@ class VideoProcessor(VideoProcessorBase):
 
 # ── Main HUD Layout ──
 # ── Top Bar: Status ──
-col_logo, col_status, col_xyz = st.columns([1, 2, 2])
-with col_logo:
-    st.markdown('<div style="font-size:1.5rem; color:#00b4ff; font-weight:700; font-family:Consolas;">DOT.HUD</div>')
-    st.markdown('<div class="status-active">● SYSTEM ACTIVE</div>', unsafe_allow_html=True)
-
-with col_status:
-    st.markdown("""
-    <div style="display:flex; gap:30px; justify-content:center; padding-top:5px;">
-        <div><span style="color:rgba(0,180,255,0.4); font-size:0.6rem;">LIVE TELEMETRY</span></div>
-        <div><span style="color:rgba(0,180,255,0.4); font-size:0.6rem;">ROUTE ANALYSIS</span></div>
-        <div><span style="color:rgba(0,180,255,0.4); font-size:0.6rem;">BEND HISTORY</span></div>
-        <div><span style="color:rgba(0,180,255,0.4); font-size:0.6rem;">VEHICLE HEALTH</span></div>
+st.markdown("""
+<div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid rgba(0,180,255,0.1);">
+    <div>
+        <span style="font-size:1.5rem; color:#00b4ff; font-weight:700; font-family:Consolas;">DOT. HUD</span>
+        <span class="status-active" style="margin-left:20px;">● SYSTEM ACTIVE</span>
     </div>
-    """, unsafe_allow_html=True)
-
-with col_xyz:
-    st.markdown('<div style="text-align:right; color:rgba(0,180,255,0.5); font-family:Consolas; font-size:0.8rem;">XYZ: 142.1 | -0.4 | 12.9</div>', unsafe_allow_html=True)
-    st.markdown('<div style="text-align:right; color:#00ff88; font-family:Consolas; font-size:0.7rem;">● LIVE</div>', unsafe_allow_html=True)
+    <div style="display:flex; gap:20px;">
+        <span style="color:rgba(0,180,255,0.3); font-size:0.6rem; font-family:Consolas;">BEND DETECTION</span>
+        <span style="color:rgba(0,180,255,0.3); font-size:0.6rem; font-family:Consolas;">REAL-TIME</span>
+        <span style="color:rgba(0,180,255,0.3); font-size:0.6rem; font-family:Consolas;">MOBILENETV2</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -527,6 +513,7 @@ with col_main:
             source = "camera"
     
     else:  # Live
+        st.info("🎥 Live video feed - point camera at the road ahead")
         rtc_config = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
         ctx = webrtc_streamer(
             key="hud-detection",
@@ -566,18 +553,40 @@ with col_main:
                     <div class="result-sharp">
                         <div class="result-sharp-text">⚠️ SHARP BEND</div>
                         <div class="result-confidence">CONFIDENCE: {result['confidence']:.1f}%</div>
-                        <div style="color:rgba(255,255,255,0.3); font-size:0.7rem; margin-top:5px; font-family:Consolas;">
-                            {result['elapsed']:.0f}ms • {source.upper()}
+                        <div class="result-meta">{result['elapsed']:.0f}ms • {source.upper()}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # ── Driving Advice ──
+                    st.markdown("""
+                    <div class="advice-box advice-box-sharp">
+                        <div style="color:#ff4444; font-size:0.8rem; font-weight:600; font-family:Consolas;">⚠️ EMERGENCY MODE</div>
+                        <div style="color:rgba(255,255,255,0.6); font-size:0.7rem; font-family:Consolas; margin-top:5px;">
+                            • Reduce speed immediately<br>
+                            • Stay in your lane<br>
+                            • Watch for oncoming traffic<br>
+                            • Do not overtake
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
+                    
                 else:
                     st.markdown(f"""
                     <div class="result-straight">
                         <div class="result-straight-text">✓ STRAIGHT ROAD</div>
                         <div class="result-confidence">CONFIDENCE: {result['confidence']:.1f}%</div>
-                        <div style="color:rgba(255,255,255,0.3); font-size:0.7rem; margin-top:5px; font-family:Consolas;">
-                            {result['elapsed']:.0f}ms • {source.upper()}
+                        <div class="result-meta">{result['elapsed']:.0f}ms • {source.upper()}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # ── Driving Advice ──
+                    st.markdown("""
+                    <div class="advice-box advice-box-straight">
+                        <div style="color:#00ff88; font-size:0.8rem; font-weight:600; font-family:Consolas;">✅ NORMAL OPERATION</div>
+                        <div style="color:rgba(255,255,255,0.6); font-size:0.7rem; font-family:Consolas; margin-top:5px;">
+                            • Maintain safe following distance<br>
+                            • Stay alert and focused<br>
+                            • Observe speed limits
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
@@ -595,6 +604,14 @@ with col_main:
                 ax.barh([" "], [sharp_pct], color="#ff4444", height=0.5, label="Sharp")
                 ax.barh([" "], [straight_pct], color="#00ff88", height=0.5, label="Straight", left=[sharp_pct])
                 
+                # Add labels on bars
+                if sharp_pct > 5:
+                    ax.text(sharp_pct/2, 0, f"{sharp_pct:.1f}%", va='center', ha='center', 
+                           color='white', fontsize=10, fontweight='bold')
+                if straight_pct > 5:
+                    ax.text(sharp_pct + straight_pct/2, 0, f"{straight_pct:.1f}%", va='center', ha='center',
+                           color='white', fontsize=10, fontweight='bold')
+                
                 ax.set_xlim(0, 100)
                 ax.set_xticks([0, 25, 50, 75, 100])
                 ax.set_xticklabels(["0%", "25%", "50%", "75%", "100%"], color='rgba(255,255,255,0.3)')
@@ -605,60 +622,56 @@ with col_main:
                     spine.set_color('rgba(255,255,255,0.1)')
                 plt.tight_layout()
                 st.pyplot(fig)
-                
-                # ── Driving Advice ──
-                if result["prediction"] == "sharp":
-                    st.warning("""
-                    ⚠️ **EMERGENCY MODE**
-                    - Reduce speed immediately
-                    - Stay in your lane
-                    - Watch for oncoming traffic
-                    - Do not overtake
-                    """)
-                else:
-                    st.success("""
-                    ✅ **NORMAL OPERATION**
-                    - Maintain safe following distance
-                    - Stay alert and focused
-                    - Observe speed limits
-                    """)
 
 with col_sidebar:
-    # ── Route Analysis ──
-    st.markdown('<div class="hud-header">ROUTE ANALYSIS</div>', unsafe_allow_html=True)
-    
-    # Distance markers
-    st.markdown("""
-    <div style="padding:5px 0; font-family:Consolas;">
-        <div style="color:rgba(0,180,255,0.3); font-size:0.6rem;">DISTANCE TO BEND</div>
-        <div style="display:flex; justify-content:space-between; color:rgba(255,255,255,0.2); font-size:0.6rem;">
-            <span>0m</span><span>50m</span><span>100m</span><span>150m</span>
-        </div>
-        <div class="route-bar">
-            <div class="route-bar-fill" style="width:0%;"></div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
     # ── Bend Analysis Result ──
+    st.markdown('<div class="hud-header">BEND ANALYSIS RESULT</div>', unsafe_allow_html=True)
+    
     if st.session_state.latest_prediction:
         result = st.session_state.latest_prediction
         if result["prediction"] == "sharp":
             st.markdown(f"""
-            <div style="background:rgba(255,68,68,0.1); border:1px solid rgba(255,68,68,0.2); border-radius:10px; padding:15px; margin:10px 0;">
-                <div style="color:#ff4444; font-size:0.8rem; font-family:Consolas;">DETECTED WHEEL DEVIATION</div>
-                <div style="color:#ff4444; font-size:1.8rem; font-weight:700; font-family:Consolas;">42°</div>
+            <div style="background:rgba(255,68,68,0.1); border:1px solid rgba(255,68,68,0.2); border-radius:10px; padding:20px; margin:10px 0; text-align:center;">
+                <div style="color:#ff4444; font-size:0.7rem; font-family:Consolas; letter-spacing:2px;">DETECTED WHEEL DEVIATION</div>
+                <div style="color:#ff4444; font-size:2.2rem; font-weight:700; font-family:Consolas;">42°</div>
                 <div style="color:rgba(255,255,255,0.3); font-size:0.6rem; font-family:Consolas;">CURVATURE ANGLE</div>
+                <div style="color:#ff4444; font-size:0.8rem; font-family:Consolas; margin-top:10px; background:rgba(255,68,68,0.1); padding:5px; border-radius:5px;">
+                    Severe / Hairpin
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown("""
+            <div style="background:rgba(255,68,68,0.05); border:1px solid rgba(255,68,68,0.15); border-radius:10px; padding:15px; text-align:center;">
+                <div style="color:#ff4444; font-size:0.7rem; font-family:Consolas; letter-spacing:2px;">CURVATURE INTENSITY</div>
+                <div style="color:#ff4444; font-size:1.2rem; font-weight:600; font-family:Consolas;">Severe / Hairpin</div>
             </div>
             """, unsafe_allow_html=True)
         else:
             st.markdown(f"""
-            <div style="background:rgba(0,255,136,0.05); border:1px solid rgba(0,255,136,0.1); border-radius:10px; padding:15px; margin:10px 0;">
-                <div style="color:#00ff88; font-size:0.8rem; font-family:Consolas;">ROAD CLEAR</div>
-                <div style="color:#00ff88; font-size:1.8rem; font-weight:700; font-family:Consolas;">0°</div>
+            <div style="background:rgba(0,255,136,0.05); border:1px solid rgba(0,255,136,0.1); border-radius:10px; padding:20px; margin:10px 0; text-align:center;">
+                <div style="color:#00ff88; font-size:0.7rem; font-family:Consolas; letter-spacing:2px;">ROAD CLEAR</div>
+                <div style="color:#00ff88; font-size:2.2rem; font-weight:700; font-family:Consolas;">0°</div>
                 <div style="color:rgba(255,255,255,0.3); font-size:0.6rem; font-family:Consolas;">CURVATURE ANGLE</div>
+                <div style="color:#00ff88; font-size:0.8rem; font-family:Consolas; margin-top:10px; background:rgba(0,255,136,0.05); padding:5px; border-radius:5px;">
+                    Normal / Straight
+                </div>
             </div>
             """, unsafe_allow_html=True)
+            
+            st.markdown("""
+            <div style="background:rgba(0,255,136,0.03); border:1px solid rgba(0,255,136,0.08); border-radius:10px; padding:15px; text-align:center;">
+                <div style="color:#00ff88; font-size:0.7rem; font-family:Consolas; letter-spacing:2px;">CURVATURE INTENSITY</div>
+                <div style="color:#00ff88; font-size:1.2rem; font-weight:600; font-family:Consolas;">Normal / Straight</div>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div style="color:rgba(255,255,255,0.1); font-size:0.8rem; font-family:Consolas; text-align:center; padding:30px 0;">
+            NO DATA<br>
+            <span style="font-size:0.6rem; color:rgba(255,255,255,0.05);">Upload or capture an image</span>
+        </div>
+        """, unsafe_allow_html=True)
     
     # ── Bend History ──
     st.markdown('<div class="hud-header" style="margin-top:15px;">BEND HISTORY</div>', unsafe_allow_html=True)
@@ -677,7 +690,7 @@ with col_sidebar:
                 </div>
                 """, unsafe_allow_html=True)
     else:
-        st.markdown('<div style="color:rgba(255,255,255,0.1); font-size:0.7rem; font-family:Consolas;">NO DATA</div>', unsafe_allow_html=True)
+        st.markdown('<div style="color:rgba(255,255,255,0.1); font-size:0.7rem; font-family:Consolas; text-align:center; padding:10px 0;">NO DATA</div>', unsafe_allow_html=True)
     
     # ── Diagnostics ──
     st.markdown('<div class="hud-header" style="margin-top:15px;">DIAGNOSTICS</div>', unsafe_allow_html=True)
@@ -686,26 +699,32 @@ with col_sidebar:
     if total > 0:
         error_rate = (st.session_state.total_errors / total * 100) if total > 0 else 0
         diag_status = "OK" if error_rate < 10 else "WARN" if error_rate < 20 else "ERROR"
-        diag_color = "#00ff88" if error_rate < 10 else "#ffaa00" if error_rate < 20 else "#ff4444"
         
         st.markdown(f"""
         <div style="font-family:Consolas; font-size:0.6rem;">
             <div class="diagnostic-item">STATUS: <span class="diagnostic-ok">{diag_status}</span></div>
             <div class="diagnostic-item">PREDICTIONS: {st.session_state.total_predictions}</div>
+            <div class="diagnostic-item">SHARP: {st.session_state.total_sharp}</div>
+            <div class="diagnostic-item">STRAIGHT: {st.session_state.total_straight}</div>
             <div class="diagnostic-item">ERRORS: {st.session_state.total_errors}</div>
             <div class="diagnostic-item">ACCURACY: 90.2%</div>
             <div class="diagnostic-item">MODEL: MOBILENETV2</div>
         </div>
         """, unsafe_allow_html=True)
     else:
-        st.markdown('<div style="color:rgba(255,255,255,0.1); font-size:0.7rem; font-family:Consolas;">SYSTEM IDLE</div>', unsafe_allow_html=True)
+        st.markdown("""
+        <div style="color:rgba(255,255,255,0.1); font-size:0.7rem; font-family:Consolas; text-align:center; padding:10px 0;">
+            SYSTEM IDLE
+        </div>
+        """, unsafe_allow_html=True)
 
 # ── Footer ──
 st.markdown("---")
 st.markdown("""
-<div style="display:flex; justify-content:space-between; font-family:Consolas; font-size:0.5rem; color:rgba(255,255,255,0.1);">
+<div style="display:flex; justify-content:space-between; font-family:Consolas; font-size:0.5rem; color:rgba(255,255,255,0.08);">
     <span>DOT.HUD v1.0</span>
     <span>⏻ SYSTEM ACTIVE</span>
     <span>🛣️ HIGHWAY BEND DETECTION</span>
+    <span>MOBILENETV2 • 90.2%</span>
 </div>
 """, unsafe_allow_html=True)
