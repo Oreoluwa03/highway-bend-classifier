@@ -21,17 +21,14 @@ st.set_page_config(
 # ── Professional CSS ──
 st.markdown("""
 <style>
-    /* ── Main Background ── */
     .stApp {
         background: #0a0a0f;
     }
     
-    /* ── Hide Default Elements ── */
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
     footer {visibility: hidden;}
     
-    /* ── Professional Header ── */
     .main-header {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         -webkit-background-clip: text;
@@ -54,7 +51,6 @@ st.markdown("""
         text-transform: uppercase;
     }
     
-    /* ── Cards ── */
     .card {
         background: rgba(255, 255, 255, 0.03);
         backdrop-filter: blur(10px);
@@ -70,7 +66,6 @@ st.markdown("""
         border-color: rgba(102, 126, 234, 0.2);
     }
     
-    /* ── Prediction Boxes ── */
     .sharp-box {
         background: linear-gradient(135deg, rgba(255, 50, 50, 0.15), rgba(200, 0, 0, 0.05));
         border: 2px solid rgba(255, 50, 50, 0.3);
@@ -128,7 +123,6 @@ st.markdown("""
         margin-top: 5px;
     }
     
-    /* ── Metrics ── */
     .metric-card {
         background: rgba(255, 255, 255, 0.03);
         border-radius: 12px;
@@ -153,7 +147,6 @@ st.markdown("""
         margin-top: 3px;
     }
     
-    /* ── History Items ── */
     .history-item {
         background: rgba(255, 255, 255, 0.02);
         border-radius: 8px;
@@ -198,7 +191,6 @@ st.markdown("""
         font-size: 0.6rem;
     }
     
-    /* ── Buttons ── */
     .stButton > button {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
@@ -217,7 +209,6 @@ st.markdown("""
         box-shadow: 0 4px 30px rgba(102, 126, 234, 0.3);
     }
     
-    /* ── Upload Area ── */
     .upload-area {
         border: 1px dashed rgba(102, 126, 234, 0.2);
         border-radius: 15px;
@@ -232,7 +223,6 @@ st.markdown("""
         background: rgba(255, 255, 255, 0.04);
     }
     
-    /* ── Sidebar ── */
     .sidebar-title {
         color: #667eea;
         font-size: 1.2rem;
@@ -271,7 +261,6 @@ st.markdown("""
         letter-spacing: 1px;
     }
     
-    /* ── About Section ── */
     .about-text {
         color: rgba(255,255,255,0.7);
         line-height: 1.8;
@@ -281,7 +270,6 @@ st.markdown("""
         color: #667eea;
     }
     
-    /* ── Footer ── */
     .footer {
         text-align: center;
         color: rgba(255,255,255,0.08);
@@ -293,7 +281,6 @@ st.markdown("""
         margin-top: 20px;
     }
     
-    /* ── Radio Buttons ── */
     .stRadio > div {
         gap: 20px;
     }
@@ -307,7 +294,6 @@ st.markdown("""
         color: #667eea !important;
     }
     
-    /* ── Metrics Table ── */
     .metrics-table {
         width: 100%;
         color: rgba(255,255,255,0.7);
@@ -612,7 +598,7 @@ if page == "🏠 Home":
                         - Observe speed limits
                         """)
                     
-                    # Confidence Chart
+                    # Confidence Chart - FIXED
                     st.markdown("### 📊 Confidence Analysis")
                     fig, ax = plt.subplots(figsize=(10, 4))
                     fig.patch.set_facecolor('#0a0a0f')
@@ -628,7 +614,7 @@ if page == "🏠 Home":
                                 fontweight='bold', color='white')
                     
                     ax.set_xlim(0, 100)
-                    ax.set_xlabel("Confidence (%)", color='rgba(255,255,255,0.3)', fontsize=12)
+                    ax.set_xlabel("Confidence (%)", fontsize=12, color='rgba(255,255,255,0.3)')
                     ax.tick_params(colors='rgba(255,255,255,0.3)')
                     for spine in ax.spines.values():
                         spine.set_color('rgba(255,255,255,0.1)')
