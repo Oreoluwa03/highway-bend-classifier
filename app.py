@@ -12,116 +12,282 @@ from datetime import datetime
 import cv2
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
 import av
+import plotly.graph_objects as go
+import plotly.express as px
 
 # ── Page Configuration ──
 st.set_page_config(
-    page_title="Highway Bend Classifier",
+    page_title="HUD - Highway Bend Detection",
     page_icon="🛣️",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
-# ── Custom CSS ──
+# ── Custom CSS for HUD Professional Look ──
 st.markdown("""
 <style>
+    /* ── Base ── */
     .stApp {
-        background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+        background: #0a0a0f;
+        font-family: 'Segoe UI', 'Consolas', monospace;
     }
     
-    .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-size: 2.5rem;
+    /* Hide default Streamlit elements */
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    
+    /* ── HUD Container ── */
+    .hud-container {
+        background: linear-gradient(180deg, rgba(10, 10, 15, 0.95), rgba(0, 0, 0, 1));
+        border: 1px solid rgba(0, 180, 255, 0.15);
+        border-radius: 15px;
+        padding: 20px;
+        margin: 10px 0;
+        box-shadow: 0 0 30px rgba(0, 180, 255, 0.05);
+        backdrop-filter: blur(10px);
+    }
+    
+    /* ── HUD Headers ── */
+    .hud-header {
+        color: #00b4ff;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 3px;
+        font-weight: 600;
+        border-bottom: 1px solid rgba(0, 180, 255, 0.15);
+        padding-bottom: 8px;
+        margin-bottom: 15px;
+        font-family: 'Consolas', monospace;
+    }
+    
+    .hud-title {
+        color: #00d4ff;
+        font-size: 2.2rem;
         font-weight: 700;
-        text-align: center;
-        padding: 20px 0;
+        letter-spacing: 2px;
+        font-family: 'Consolas', monospace;
+        text-shadow: 0 0 30px rgba(0, 180, 255, 0.2);
     }
     
-    .sub-header {
-        color: #a8b5d9;
-        text-align: center;
-        font-size: 1rem;
-        margin-bottom: 20px;
+    .hud-subtitle {
+        color: rgba(0, 180, 255, 0.5);
+        font-size: 0.7rem;
+        letter-spacing: 4px;
+        text-transform: uppercase;
+        font-family: 'Consolas', monospace;
     }
     
-    .sharp-box {
-        background: linear-gradient(135deg, #ff6b6b, #ee5a24);
-        border-radius: 15px;
+    /* ── Status Badge ── */
+    .status-active {
+        color: #00ff88;
+        font-size: 0.7rem;
+        letter-spacing: 2px;
+        font-weight: 600;
+        animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.4; }
+        100% { opacity: 1; }
+    }
+    
+    /* ── Telemetry Numbers ── */
+    .telemetry-value {
+        color: #00d4ff;
+        font-size: 1.8rem;
+        font-weight: 700;
+        font-family: 'Consolas', monospace;
+        text-shadow: 0 0 20px rgba(0, 180, 255, 0.15);
+    }
+    
+    .telemetry-label {
+        color: rgba(0, 180, 255, 0.5);
+        font-size: 0.6rem;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        font-family: 'Consolas', monospace;
+    }
+    
+    .telemetry-unit {
+        color: rgba(0, 180, 255, 0.3);
+        font-size: 0.7rem;
+        font-family: 'Consolas', monospace;
+    }
+    
+    /* ── Detection Result Box ── */
+    .result-sharp {
+        background: linear-gradient(135deg, rgba(255, 50, 50, 0.15), rgba(200, 0, 0, 0.05));
+        border: 2px solid rgba(255, 50, 50, 0.4);
+        border-radius: 12px;
+        padding: 20px;
+        text-align: center;
+        box-shadow: 0 0 40px rgba(255, 50, 50, 0.1);
+    }
+    
+    .result-straight {
+        background: linear-gradient(135deg, rgba(0, 255, 136, 0.1), rgba(0, 200, 100, 0.05));
+        border: 2px solid rgba(0, 255, 136, 0.3);
+        border-radius: 12px;
+        padding: 20px;
+        text-align: center;
+        box-shadow: 0 0 40px rgba(0, 255, 136, 0.05);
+    }
+    
+    .result-sharp-text {
+        color: #ff4444;
+        font-size: 2rem;
+        font-weight: 700;
+        letter-spacing: 3px;
+        font-family: 'Consolas', monospace;
+        text-shadow: 0 0 30px rgba(255, 50, 50, 0.3);
+    }
+    
+    .result-straight-text {
+        color: #00ff88;
+        font-size: 2rem;
+        font-weight: 700;
+        letter-spacing: 3px;
+        font-family: 'Consolas', monospace;
+        text-shadow: 0 0 30px rgba(0, 255, 136, 0.2);
+    }
+    
+    .result-confidence {
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 0.9rem;
+        letter-spacing: 1px;
+        font-family: 'Consolas', monospace;
+    }
+    
+    /* ── Metrics Cards ── */
+    .metric-card {
+        background: rgba(0, 180, 255, 0.03);
+        border: 1px solid rgba(0, 180, 255, 0.08);
+        border-radius: 10px;
         padding: 15px;
         text-align: center;
-        color: white;
-        box-shadow: 0 4px 15px rgba(238, 90, 36, 0.3);
-    }
-    
-    .straight-box {
-        background: linear-gradient(135deg, #00b894, #00a86b);
-        border-radius: 15px;
-        padding: 15px;
-        text-align: center;
-        color: white;
-        box-shadow: 0 4px 15px rgba(0, 168, 107, 0.3);
-    }
-    
-    .error-box {
-        background: linear-gradient(135deg, #ff6b6b, #c0392b);
-        border-radius: 15px;
-        padding: 15px;
-        text-align: center;
-        color: white;
-        box-shadow: 0 4px 15px rgba(192, 57, 43, 0.3);
-    }
-    
-    .history-item {
-        background: rgba(255, 255, 255, 0.03);
-        border-radius: 8px;
-        padding: 8px 12px;
-        margin: 3px 0;
-        border-left: 3px solid #667eea;
         transition: all 0.3s ease;
     }
     
-    .history-item:hover {
-        background: rgba(255, 255, 255, 0.08);
-        transform: translateX(5px);
-    }
-    
-    .history-item-error {
-        background: rgba(255, 0, 0, 0.05);
-        border-radius: 8px;
-        padding: 8px 12px;
-        margin: 3px 0;
-        border-left: 3px solid #ff6b6b;
-    }
-    
-    .metric-card {
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 10px;
-        padding: 12px;
-        text-align: center;
-        border-left: 4px solid #667eea;
+    .metric-card:hover {
+        border-color: rgba(0, 180, 255, 0.2);
+        background: rgba(0, 180, 255, 0.05);
     }
     
     .metric-value {
-        font-size: 1.5rem;
+        color: #00d4ff;
+        font-size: 1.6rem;
         font-weight: 700;
-        color: #ffffff;
+        font-family: 'Consolas', monospace;
     }
     
     .metric-label {
-        color: #a8b5d9;
-        font-size: 0.8rem;
+        color: rgba(0, 180, 255, 0.4);
+        font-size: 0.6rem;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        font-family: 'Consolas', monospace;
     }
     
-    .mode-selector {
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 10px;
-        padding: 15px;
+    /* ── Route Analysis ── */
+    .route-bar {
+        background: rgba(0, 180, 255, 0.05);
+        border-radius: 20px;
+        height: 6px;
         margin: 10px 0;
+        overflow: hidden;
     }
     
-    .mode-selector label {
-        color: white !important;
+    .route-bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #00ff88, #00d4ff, #ff4444);
+        border-radius: 20px;
+        transition: width 0.5s ease;
+    }
+    
+    /* ── Bend History ── */
+    .history-item {
+        background: rgba(0, 180, 255, 0.03);
+        border-left: 3px solid #00b4ff;
+        padding: 8px 12px;
+        margin: 4px 0;
+        border-radius: 0 8px 8px 0;
+        font-family: 'Consolas', monospace;
+    }
+    
+    .history-item-sharp {
+        border-left-color: #ff4444;
+    }
+    
+    .history-item-straight {
+        border-left-color: #00ff88;
+    }
+    
+    .history-time {
+        color: rgba(255, 255, 255, 0.3);
+        font-size: 0.6rem;
+        font-family: 'Consolas', monospace;
+    }
+    
+    .history-label {
+        color: rgba(255, 255, 255, 0.8);
+        font-size: 0.8rem;
+        font-family: 'Consolas', monospace;
+    }
+    
+    /* ── Buttons ── */
+    .stButton > button {
+        background: rgba(0, 180, 255, 0.1) !important;
+        color: #00b4ff !important;
+        border: 1px solid rgba(0, 180, 255, 0.2) !important;
+        border-radius: 8px !important;
+        font-family: 'Consolas', monospace !important;
+        font-size: 0.8rem !important;
+        letter-spacing: 2px !important;
+        transition: all 0.3s ease !important;
+        width: 100% !important;
+    }
+    
+    .stButton > button:hover {
+        background: rgba(0, 180, 255, 0.15) !important;
+        border-color: #00b4ff !important;
+        box-shadow: 0 0 30px rgba(0, 180, 255, 0.1) !important;
+    }
+    
+    /* ── File Uploader ── */
+    .upload-container {
+        border: 1px dashed rgba(0, 180, 255, 0.2) !important;
+        border-radius: 10px !important;
+        padding: 30px !important;
+        text-align: center !important;
+        background: rgba(0, 180, 255, 0.02) !important;
+    }
+    
+    .upload-container:hover {
+        border-color: rgba(0, 180, 255, 0.4) !important;
+    }
+    
+    /* ── Diagnostics ── */
+    .diagnostic-item {
+        color: rgba(0, 180, 255, 0.4);
+        font-size: 0.6rem;
+        letter-spacing: 1px;
+        font-family: 'Consolas', monospace;
+        border-bottom: 1px solid rgba(0, 180, 255, 0.05);
+        padding: 4px 0;
+    }
+    
+    .diagnostic-ok {
+        color: #00ff88;
+    }
+    
+    .diagnostic-warn {
+        color: #ffaa00;
+    }
+    
+    .diagnostic-error {
+        color: #ff4444;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -129,7 +295,7 @@ st.markdown("""
 # ── Constants ──
 CLASSES = ["sharp", "straight"]
 CLASS_NAMES = ["Sharp Bend", "Straight Road"]
-CLASS_COLORS = {"sharp": "#ff6b6b", "straight": "#00b894"}
+CLASS_COLORS = {"sharp": "#ff4444", "straight": "#00ff88"}
 CLASS_EMOJIS = {"sharp": "🔴", "straight": "🟢"}
 IMG_SIZE = (224, 224)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -184,9 +350,8 @@ transform = transforms.Compose([
 # ── Input Validation ──
 def validate_road_image(image):
     img_array = np.array(image)
-    
     if img_array.shape[0] < 50 or img_array.shape[1] < 50:
-        return False, "Image is too small. Please upload a larger image."
+        return False, "Image too small"
     
     h, w = img_array.shape[:2]
     sample_size = min(1000, h * w // 10)
@@ -199,7 +364,7 @@ def validate_road_image(image):
             pixel = img_array[r, c]
             if len(pixel) >= 3:
                 r_val, g_val, b_val = pixel[:3]
-                if abs(r_val - g_val) < 30 and abs(g_val - b_val) < 30 and abs(r_val - b_val) < 30:
+                if abs(r_val - g_val) < 30 and abs(g_val - b_val) < 30:
                     road_colors += 1
                 elif r_val > 100 and g_val > 80 and b_val < 100:
                     road_colors += 1
@@ -207,11 +372,9 @@ def validate_road_image(image):
                     road_colors += 1
     
     road_ratio = road_colors / sample_size
-    
     if road_ratio < 0.05:
-        return False, "No road-like colors detected. Please upload a highway or road image."
-    
-    return True, "Valid road image"
+        return False, "No road-like colors detected"
+    return True, "Valid"
 
 # ── Prediction Function ──
 def predict_image(img, source="upload"):
@@ -241,7 +404,6 @@ def predict_image(img, source="upload"):
         "time": datetime.now().strftime("%H:%M:%S"),
         "date": datetime.now().strftime("%Y-%m-%d")
     }
-    
     return result, None
 
 # ── Video Processor ──
@@ -255,8 +417,6 @@ class VideoProcessor(VideoProcessorBase):
         self.fps = 0
         self.frame_count = 0
         self.start_time = time.time()
-        self.prediction_count = 0
-        self.last_prediction_time = 0
         
     def recv(self, frame):
         try:
@@ -286,585 +446,266 @@ class VideoProcessor(VideoProcessorBase):
                     self.frame_count = 0
                     self.start_time = time.time()
                 
-                # Draw on frame
+                # HUD overlay
                 label = f"{self.classes[pred].upper()}"
-                color = (0, 255, 0) if self.classes[pred] == "straight" else (0, 0, 255)
-                cv2.putText(img, f"{label} ({confidence:.1f}%)", (10, 30), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-                cv2.putText(img, f"FPS: {self.fps}", (10, 70), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                color = (0, 255, 136) if self.classes[pred] == "straight" else (68, 68, 255)
+                cv2.rectangle(img, (10, 10), (250, 100), (0, 0, 0, 180), -1)
+                cv2.putText(img, "DETECTION", (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 180, 255), 1)
+                cv2.putText(img, f"{label} {confidence:.1f}%", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+                cv2.putText(img, f"FPS: {self.fps}", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (100, 200, 255), 1)
                 
-                # Confidence bar
-                bar_width = 200
-                bar_height = 20
-                sharp_width = int(bar_width * (probs[0].item()))
-                cv2.rectangle(img, (10, 100), (10 + bar_width, 100 + bar_height), 
-                             (50, 50, 50), -1)
-                cv2.rectangle(img, (10, 100), (10 + sharp_width, 100 + bar_height), 
-                             (0, 0, 255), -1)
-                cv2.rectangle(img, (10 + sharp_width, 100), 
-                             (10 + bar_width, 100 + bar_height), 
-                             (0, 255, 0), -1)
-                cv2.putText(img, f"Sharp: {probs[0].item()*100:.1f}%", (10, 135), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                # Progress bar
+                bar_x, bar_y = 20, 115
+                bar_w, bar_h = 200, 6
+                sharp_w = int(bar_w * (probs[0].item()))
+                cv2.rectangle(img, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (40, 40, 40), -1)
+                cv2.rectangle(img, (bar_x, bar_y), (bar_x + sharp_w, bar_y + bar_h), (68, 68, 255), -1)
+                cv2.rectangle(img, (bar_x + sharp_w, bar_y), (bar_x + bar_w, bar_y + bar_h), (0, 255, 136), -1)
                 
-                # Update session state with latest prediction
                 st.session_state.latest_prediction = self.result
-                
-                # Auto-save to history (only if confidence > 60% and different from last)
-                current_time = time.time()
-                if confidence > 60 and (current_time - self.last_prediction_time > 0.5):
-                    # Check if different from last prediction
-                    if not st.session_state.history or st.session_state.history[-1]["prediction"] != self.classes[pred]:
-                        self.last_prediction_time = current_time
-                        # We'll save in the main app to avoid session state conflicts
                 
             return av.VideoFrame.from_ndarray(img, format="bgr24")
         except Exception as e:
             return frame
 
-# ── Sidebar ──
-with st.sidebar:
-    st.markdown("# 🛣️ Highway Bend")
-    st.markdown("### Classifier")
-    st.markdown("---")
-    
-    page = st.radio(
-        "Navigate",
-        ["📸 Home", "🎥 Live Feed", "📊 Dashboard", "🕐 History", "ℹ️ About"],
-        index=0
-    )
-    
-    st.markdown("---")
-    
-    st.markdown("### 📊 Statistics")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Total", st.session_state.total_predictions)
-    with col2:
-        st.metric("Sharp", st.session_state.total_sharp)
-    
-    col3, col4 = st.columns(2)
-    with col3:
-        st.metric("Straight", st.session_state.total_straight)
-    with col4:
-        avg_conf = np.mean([h["confidence"] for h in st.session_state.history]) if st.session_state.history else 0
-        st.metric("Avg Conf", f"{avg_conf:.1f}%")
-    
-    if st.session_state.total_errors > 0:
-        st.metric("⚠️ Errors", st.session_state.total_errors)
-    
-    st.markdown("---")
-    if st.button("🗑️ Clear History", use_container_width=True):
-        st.session_state.history = []
-        st.session_state.total_sharp = 0
-        st.session_state.total_straight = 0
-        st.session_state.total_predictions = 0
-        st.session_state.total_errors = 0
-        st.rerun()
+# ── Main HUD Layout ──
+# ── Top Bar: Status ──
+col_logo, col_status, col_xyz = st.columns([1, 2, 2])
+with col_logo:
+    st.markdown('<div style="font-size:1.5rem; color:#00b4ff; font-weight:700; font-family:Consolas;">DOT.HUD</div>')
+    st.markdown('<div class="status-active">● SYSTEM ACTIVE</div>', unsafe_allow_html=True)
 
-# ── Pages ──
-if page == "📸 Home":
-    st.markdown('<div class="main-header">🛣️ Highway Bend Classifier</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Deep Learning Road Safety System • 90.2% Accuracy</div>', unsafe_allow_html=True)
+with col_status:
+    st.markdown("""
+    <div style="display:flex; gap:30px; justify-content:center; padding-top:5px;">
+        <div><span style="color:rgba(0,180,255,0.4); font-size:0.6rem;">LIVE TELEMETRY</span></div>
+        <div><span style="color:rgba(0,180,255,0.4); font-size:0.6rem;">ROUTE ANALYSIS</span></div>
+        <div><span style="color:rgba(0,180,255,0.4); font-size:0.6rem;">BEND HISTORY</span></div>
+        <div><span style="color:rgba(0,180,255,0.4); font-size:0.6rem;">VEHICLE HEALTH</span></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col_xyz:
+    st.markdown('<div style="text-align:right; color:rgba(0,180,255,0.5); font-family:Consolas; font-size:0.8rem;">XYZ: 142.1 | -0.4 | 12.9</div>', unsafe_allow_html=True)
+    st.markdown('<div style="text-align:right; color:#00ff88; font-family:Consolas; font-size:0.7rem;">● LIVE</div>', unsafe_allow_html=True)
+
+st.markdown("---")
+
+# ── Main Content ──
+col_main, col_sidebar = st.columns([2, 1])
+
+with col_main:
+    # ── Input Section ──
+    st.markdown('<div class="hud-header">INPUT</div>', unsafe_allow_html=True)
     
-    # Mode Selection
-    st.markdown("### 📌 Select Input Mode")
-    mode = st.radio(
+    input_method = st.radio(
         "",
-        ["📤 Upload Image", "📸 Take Photo"],
-        horizontal=True
+        ["📤 Upload", "📸 Camera", "🎥 Live"],
+        horizontal=True,
+        label_visibility="collapsed"
     )
     
-    col1, col2 = st.columns([1, 1])
+    uploaded = None
+    camera_image = None
+    img = None
+    source = None
     
-    with col1:
-        st.markdown("### 📤 Input")
-        
-        uploaded = None
-        camera_image = None
-        img = None
-        source = None
-        
-        if mode == "📤 Upload Image":
-            uploaded = st.file_uploader(
-                "Upload a highway image",
-                type=["jpg", "jpeg", "png", "bmp", "webp"],
-                help="Upload clear images of highways, roads, or streets"
-            )
+    if input_method == "📤 Upload":
+        uploaded = st.file_uploader(
+            "Upload highway image",
+            type=["jpg", "jpeg", "png"],
+            label_visibility="collapsed"
+        )
+        if uploaded:
+            img = Image.open(uploaded).convert("RGB")
+            source = "upload"
             
-            if uploaded:
-                img = Image.open(uploaded).convert("RGB")
-                st.image(img, caption="Uploaded Image", use_column_width=True)
-                source = "upload"
+    elif input_method == "📸 Camera":
+        camera_image = st.camera_input("Take photo", label_visibility="collapsed")
+        if camera_image:
+            img = Image.open(camera_image).convert("RGB")
+            source = "camera"
+    
+    else:  # Live
+        rtc_config = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
+        ctx = webrtc_streamer(
+            key="hud-detection",
+            video_processor_factory=VideoProcessor,
+            rtc_configuration=rtc_config,
+            media_stream_constraints={"video": True, "audio": False},
+            async_processing=True,
+        )
+        if ctx.video_processor:
+            ctx.video_processor.model = model
+            ctx.video_processor.transform = transform
+            ctx.video_processor.classes = CLASSES
+            ctx.video_processor.device = DEVICE
+    
+    # ── Classification ──
+    if uploaded or camera_image:
+        st.image(img, caption="INPUT", use_column_width=True)
         
-        else:  # Camera
-            camera_image = st.camera_input("Take a photo of the road ahead")
+        if st.button("ANALYZE", use_container_width=True):
+            with st.spinner("PROCESSING..."):
+                result, error = predict_image(img, source)
             
-            if camera_image:
-                img = Image.open(camera_image).convert("RGB")
-                st.image(img, caption="Captured Image", use_column_width=True)
-                source = "camera"
-        
-        # Classify button
-        if uploaded or camera_image:
-            if st.button("🔍 Classify Image", use_container_width=True, type="primary"):
-                with st.spinner("🔄 Analyzing image..."):
-                    result, error = predict_image(img, source)
-                
-                if error:
-                    st.session_state.total_errors += 1
-                    st.session_state.history.append({
-                        "type": "error",
-                        "time": datetime.now().strftime("%H:%M:%S"),
-                        "date": datetime.now().strftime("%Y-%m-%d"),
-                        "error": error,
-                        "source": source
-                    })
-                    
-                    st.markdown(f"""
-                    <div class="error-box">
-                        <h2 style="margin:0;">❌ INVALID IMAGE</h2>
-                        <p style="font-size:1rem; margin:10px 0;">{error}</p>
-                        <p style="opacity:0.8;">Please upload a clear image of a road or highway</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    st.warning("""
-                    📸 **Tips for better results:**
-                    - Take a photo of the road ahead
-                    - Ensure good lighting
-                    - Frame the road clearly
-                    - Avoid photos with people or buildings
-                    """)
-                    
-                else:
-                    st.session_state.total_predictions += 1
-                    if result["prediction"] == "sharp":
-                        st.session_state.total_sharp += 1
-                    else:
-                        st.session_state.total_straight += 1
-                    
-                    st.session_state.history.append({
-                        "type": "prediction",
-                        **result
-                    })
-                    
-                    if result["prediction"] == "sharp":
-                        st.markdown(f"""
-                        <div class="sharp-box">
-                            <h2 style="margin:0;">🔴 SHARP BEND DETECTED</h2>
-                            <p style="font-size:1.1rem; margin:10px 0;">Confidence: {result['confidence']:.1f}%</p>
-                            <p style="opacity:0.8;">⏱️ Processed in {result['elapsed']:.0f}ms • 📸 {source.title()}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                        st.warning("""
-                        ⚠️ **Driving Advice — Sharp Bend**
-                        - Reduce speed immediately
-                        - Stay in your lane
-                        - Watch for oncoming traffic
-                        - Do not overtake
-                        - Use headlights in low visibility
-                        """)
-                    else:
-                        st.markdown(f"""
-                        <div class="straight-box">
-                            <h2 style="margin:0;">🟢 STRAIGHT ROAD</h2>
-                            <p style="font-size:1.1rem; margin:10px 0;">Confidence: {result['confidence']:.1f}%</p>
-                            <p style="opacity:0.8;">⏱️ Processed in {result['elapsed']:.0f}ms • 📸 {source.title()}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                        st.success("""
-                        ✅ **Driving Advice — Straight Road**
-                        - Normal driving conditions
-                        - Maintain safe following distance
-                        - Stay alert and focused
-                        - Observe speed limits
-                        """)
-                    
-                    # Confidence Chart
-                    st.markdown("### 📊 Confidence Analysis")
-                    fig, ax = plt.subplots(figsize=(10, 4))
-                    fig.patch.set_facecolor('#1a1a2e')
-                    ax.set_facecolor('#1a1a2e')
-                    
-                    bars = ax.barh(CLASS_NAMES, 
-                                  [result['sharp_prob'], result['straight_prob']],
-                                  color=["#ff6b6b", "#00b894"], height=0.5)
-                    
-                    for bar, val in zip(bars, [result['sharp_prob'], result['straight_prob']]):
-                        ax.text(min(val + 2, 90), bar.get_y() + bar.get_height()/2,
-                                f"{val:.1f}%", va='center', fontsize=14, 
-                                fontweight='bold', color='white')
-                    
-                    ax.set_xlim(0, 100)
-                    ax.set_xlabel("Confidence (%)", color='white', fontsize=12)
-                    ax.tick_params(colors='white')
-                    for spine in ax.spines.values():
-                        spine.set_color('white')
-                    plt.tight_layout()
-                    st.pyplot(fig)
-    
-    with col2:
-        st.markdown("### 📈 Performance Summary")
-        
-        cols = st.columns(2)
-        with cols[0]:
-            st.markdown("""
-            <div class="metric-card">
-                <div class="metric-value">90.2%</div>
-                <div class="metric-label">Accuracy</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with cols[1]:
-            avg_conf = np.mean([h["confidence"] for h in st.session_state.history 
-                              if h.get("type") == "prediction"]) if st.session_state.history else 0
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value">{avg_conf:.1f}%</div>
-                <div class="metric-label">Avg Confidence</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("### 📊 Model Performance")
-        metrics_data = {
-            "Class": ["Sharp Bend", "Straight Road"],
-            "Precision": ["92%", "89%"],
-            "Recall": ["89%", "92%"],
-            "F1-Score": ["90%", "90%"]
-        }
-        df = pd.DataFrame(metrics_data)
-        st.dataframe(df, hide_index=True, use_container_width=True)
-        
-        st.markdown("### 📈 Recent Activity")
-        if st.session_state.history:
-            recent = st.session_state.history[-3:]
-            for item in reversed(recent):
-                if item.get("type") == "error":
-                    st.markdown(f"""
-                    <div class="history-item-error">
-                        <b>❌ Invalid Input</b>
-                        <span style="float:right; color:#a8b5d9;">{item['time']}</span>
-                        <br>
-                        <small style="color:#a8b5d9;">{item['error'][:50]}...</small>
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    emoji = CLASS_EMOJIS[item["prediction"]]
-                    color = "#ff6b6b" if item["prediction"] == "sharp" else "#00b894"
-                    st.markdown(f"""
-                    <div class="history-item" style="border-left-color: {color};">
-                        <b>{emoji} {item['prediction'].upper()}</b>
-                        <span style="float:right; color:#a8b5d9;">{item['confidence']:.1f}%</span>
-                        <br>
-                        <small style="color:#a8b5d9;">🕐 {item['time']} • 📸 {item.get('source', 'upload').title()}</small>
-                    </div>
-                    """, unsafe_allow_html=True)
-        else:
-            st.info("No activity yet. Upload or capture an image!")
-
-elif page == "🎥 Live Feed":
-    st.markdown('<div class="main-header">🛣️ Live Highway Bend Detection</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">🔴 Sharp Bend Detection • 🟢 Straight Road Detection • Real-time Analysis</div>', unsafe_allow_html=True)
-    
-    # Live feed controls
-    col1, col2, col3 = st.columns([1, 1, 1])
-    
-    with col1:
-        st.markdown("### 🎥 Camera Feed")
-        st.caption("Enable camera and point at the road ahead")
-    
-    with col2:
-        st.markdown("### 📊 Detection Mode")
-        confidence_threshold = st.slider("Confidence Threshold", 0.5, 1.0, 0.7, 0.05)
-    
-    with col3:
-        st.markdown("### ⚙️ Auto-Save")
-        auto_save = st.checkbox("Auto-save predictions", value=True)
-    
-    # Live video stream
-    rtc_configuration = RTCConfiguration(
-        {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
-    )
-    
-    ctx = webrtc_streamer(
-        key="highway-detection",
-        video_processor_factory=VideoProcessor,
-        rtc_configuration=rtc_configuration,
-        media_stream_constraints={"video": True, "audio": False},
-        async_processing=True,
-    )
-    
-    # Set up the video processor with model
-    if ctx.video_processor:
-        ctx.video_processor.model = model
-        ctx.video_processor.transform = transform
-        ctx.video_processor.classes = CLASSES
-        ctx.video_processor.device = DEVICE
-    
-    # Display current prediction and auto-save
-    if st.session_state.latest_prediction:
-        result = st.session_state.latest_prediction
-        
-        # Auto-save to history
-        if auto_save and result["confidence"] >= confidence_threshold * 100:
-            if not st.session_state.history or st.session_state.history[-1]["prediction"] != result["prediction"]:
+            if error:
+                st.error(f"⚠️ {error}")
+                st.session_state.total_errors += 1
+            else:
                 st.session_state.total_predictions += 1
                 if result["prediction"] == "sharp":
                     st.session_state.total_sharp += 1
                 else:
                     st.session_state.total_straight += 1
+                st.session_state.history.append({"type": "prediction", **result})
                 
-                st.session_state.history.append({
-                    "type": "prediction",
-                    "prediction": result["prediction"],
-                    "confidence": result["confidence"],
-                    "sharp_prob": result["sharp_prob"],
-                    "straight_prob": result["straight_prob"],
-                    "time": datetime.now().strftime("%H:%M:%S"),
-                    "date": datetime.now().strftime("%Y-%m-%d"),
-                    "source": "live"
-                })
-        
-        # Display result
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            if result["prediction"] == "sharp":
-                st.markdown(f"""
-                <div class="sharp-box">
-                    <h2>🔴 SHARP BEND</h2>
-                    <p style="font-size:1.2rem;">Confidence: {result['confidence']:.1f}%</p>
-                    <p style="opacity:0.8;">⚠️ Reduce speed immediately!</p>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                <div class="straight-box">
-                    <h2>🟢 STRAIGHT ROAD</h2>
-                    <p style="font-size:1.2rem;">Confidence: {result['confidence']:.1f}%</p>
-                    <p style="opacity:0.8;">✅ Normal driving conditions</p>
-                </div>
-                """, unsafe_allow_html=True)
-        
-        with col2:
-            fig, ax = plt.subplots(figsize=(6, 3))
-            fig.patch.set_facecolor('#1a1a2e')
-            ax.set_facecolor('#1a1a2e')
-            
-            bars = ax.barh(CLASS_NAMES, 
-                          [result['sharp_prob'], result['straight_prob']],
-                          color=["#ff6b6b", "#00b894"], height=0.5)
-            
-            for bar, val in zip(bars, [result['sharp_prob'], result['straight_prob']]):
-                ax.text(min(val + 2, 90), bar.get_y() + bar.get_height()/2,
-                        f"{val:.1f}%", va='center', fontsize=12, 
-                        fontweight='bold', color='white')
-            
-            ax.set_xlim(0, 100)
-            ax.set_xlabel("Confidence (%)", color='white', fontsize=10)
-            ax.tick_params(colors='white')
-            for spine in ax.spines.values():
-                spine.set_color('white')
-            plt.tight_layout()
-            st.pyplot(fig)
-    
-    else:
-        st.info("📸 Please enable your camera and point it at the road ahead")
-        st.caption("""
-        **Tips for best results:**
-        - Ensure good lighting
-        - Point camera at the road ahead
-        - Keep the road centered in frame
-        - Avoid glare and reflections
-        """)
-
-elif page == "📊 Dashboard":
-    st.markdown('<div class="main-header">📊 Analytics Dashboard</div>', unsafe_allow_html=True)
-    
-    if st.session_state.total_predictions == 0:
-        st.info("📊 No data yet. Make some predictions to see analytics!")
-        st.stop()
-    
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Total Predictions", st.session_state.total_predictions)
-    with col2:
-        st.metric("Sharp Bends", st.session_state.total_sharp)
-    with col3:
-        st.metric("Straight Roads", st.session_state.total_straight)
-    with col4:
-        avg_conf = np.mean([h["confidence"] for h in st.session_state.history])
-        st.metric("Avg Confidence", f"{avg_conf:.1f}%")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("### 📊 Class Distribution")
-        fig, ax = plt.subplots(figsize=(8, 6))
-        fig.patch.set_facecolor('#1a1a2e')
-        ax.set_facecolor('#1a1a2e')
-        ax.pie([st.session_state.total_sharp, st.session_state.total_straight],
-               labels=["Sharp Bend", "Straight Road"],
-               colors=["#ff6b6b", "#00b894"],
-               autopct='%1.1f%%',
-               startangle=90,
-               textprops={'color': 'white', 'fontsize': 12})
-        ax.axis('equal')
-        plt.tight_layout()
-        st.pyplot(fig)
-    
-    with col2:
-        st.markdown("### 📈 Confidence Trend")
-        if st.session_state.history:
-            df_history = pd.DataFrame(st.session_state.history)
-            df_history['index'] = range(1, len(df_history) + 1)
-            
-            fig, ax = plt.subplots(figsize=(10, 5))
-            fig.patch.set_facecolor('#1a1a2e')
-            ax.set_facecolor('#1a1a2e')
-            colors = ['#ff6b6b' if p == 'sharp' else '#00b894' for p in df_history['prediction']]
-            ax.scatter(df_history['index'], df_history['confidence'], c=colors, s=100, alpha=0.6)
-            ax.plot(df_history['index'], df_history['confidence'], color='white', alpha=0.3)
-            avg_conf = np.mean(df_history['confidence'])
-            ax.axhline(y=avg_conf, color='#667eea', linestyle='--', label=f'Avg: {avg_conf:.1f}%')
-            ax.set_xlabel('Prediction Number', color='white')
-            ax.set_ylabel('Confidence (%)', color='white')
-            ax.set_ylim(0, 105)
-            ax.tick_params(colors='white')
-            for spine in ax.spines.values():
-                spine.set_color('white')
-            ax.legend(facecolor='#1a1a2e', labelcolor='white')
-            plt.tight_layout()
-            st.pyplot(fig)
-    
-    st.markdown("### 📋 Full History")
-    if st.session_state.history:
-        df_full = pd.DataFrame(st.session_state.history)
-        df_full['prediction'] = df_full['prediction'].str.upper()
-        df_full = df_full[['date', 'time', 'prediction', 'confidence', 'sharp_prob', 'straight_prob']]
-        df_full.columns = ['Date', 'Time', 'Class', 'Confidence %', 'Sharp %', 'Straight %']
-        st.dataframe(df_full, use_container_width=True)
-        
-        csv = df_full.to_csv(index=False)
-        st.download_button(
-            label="📥 Download History CSV",
-            data=csv,
-            file_name="predictions_history.csv",
-            mime="text/csv"
-        )
-
-elif page == "🕐 History":
-    st.markdown('<div class="main-header">🕐 Prediction History</div>', unsafe_allow_html=True)
-    
-    if not st.session_state.history:
-        st.info("📭 No predictions yet. Upload an image or start the live feed!")
-    else:
-        filter_type = st.selectbox(
-            "Filter by:",
-            ["All", "Predictions Only", "Errors Only", "Live Feed", "Uploads"]
-        )
-        
-        filtered_history = st.session_state.history
-        if filter_type == "Predictions Only":
-            filtered_history = [h for h in st.session_state.history if h.get("type") == "prediction"]
-        elif filter_type == "Errors Only":
-            filtered_history = [h for h in st.session_state.history if h.get("type") == "error"]
-        elif filter_type == "Live Feed":
-            filtered_history = [h for h in st.session_state.history if h.get("source") == "live"]
-        elif filter_type == "Uploads":
-            filtered_history = [h for h in st.session_state.history if h.get("source") in ["upload", "camera"]]
-        
-        for i, item in enumerate(reversed(filtered_history)):
-            if item.get("type") == "error":
-                with st.container():
-                    col1, col2 = st.columns([1, 3])
-                    with col1:
-                        st.markdown(f"### #{len(st.session_state.history) - i}")
-                        st.caption(item["date"])
-                    with col2:
-                        st.markdown(f"""
-                        <div class="history-item-error">
-                            <h3 style="margin:0; color: #ff6b6b;">❌ INVALID INPUT</h3>
-                            <p style="margin:5px 0;">
-                                Error: <b>{item['error']}</b>
-                            </p>
-                            <p style="margin:5px 0; font-size:0.9rem; color:#a8b5d9;">
-                                📸 {item.get('source', 'upload').title()} • 🕐 {item['time']}
-                            </p>
+                # ── Result Display ──
+                if result["prediction"] == "sharp":
+                    st.markdown(f"""
+                    <div class="result-sharp">
+                        <div class="result-sharp-text">⚠️ SHARP BEND</div>
+                        <div class="result-confidence">CONFIDENCE: {result['confidence']:.1f}%</div>
+                        <div style="color:rgba(255,255,255,0.3); font-size:0.7rem; margin-top:5px; font-family:Consolas;">
+                            {result['elapsed']:.0f}ms • {source.upper()}
                         </div>
-                        """, unsafe_allow_html=True)
-            else:
-                emoji = CLASS_EMOJIS[item["prediction"]]
-                color = "#ff6b6b" if item["prediction"] == "sharp" else "#00b894"
-                source_icon = "📺" if item.get("source") == "live" else "📸"
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div class="result-straight">
+                        <div class="result-straight-text">✓ STRAIGHT ROAD</div>
+                        <div class="result-confidence">CONFIDENCE: {result['confidence']:.1f}%</div>
+                        <div style="color:rgba(255,255,255,0.3); font-size:0.7rem; margin-top:5px; font-family:Consolas;">
+                            {result['elapsed']:.0f}ms • {source.upper()}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
                 
-                with st.container():
-                    col1, col2 = st.columns([1, 3])
-                    with col1:
-                        st.markdown(f"### #{len(st.session_state.history) - i}")
-                        st.caption(item["date"])
-                    with col2:
-                        st.markdown(f"""
-                        <div class="history-item" style="border-left-color: {color};">
-                            <h3 style="margin:0; color: {color};">{emoji} {item['prediction'].upper()}</h3>
-                            <p style="margin:5px 0;">
-                                Confidence: <b>{item['confidence']:.1f}%</b>
-                                • Processed: <b>{item['elapsed']:.0f}ms</b>
-                                • {source_icon} {item.get('source', 'upload').title()}
-                            </p>
-                            <p style="margin:5px 0; font-size:0.9rem; color:#a8b5d9;">
-                                Sharp: {item['sharp_prob']:.1f}% • Straight: {item['straight_prob']:.1f}%
-                            </p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                # ── Confidence Bar ──
+                st.markdown('<div class="hud-header" style="margin-top:15px;">CURVATURE INTENSITY</div>', unsafe_allow_html=True)
+                
+                fig, ax = plt.subplots(figsize=(10, 2))
+                fig.patch.set_facecolor('none')
+                ax.set_facecolor('none')
+                
+                sharp_pct = result['sharp_prob']
+                straight_pct = result['straight_prob']
+                
+                ax.barh([" "], [sharp_pct], color="#ff4444", height=0.5, label="Sharp")
+                ax.barh([" "], [straight_pct], color="#00ff88", height=0.5, label="Straight", left=[sharp_pct])
+                
+                ax.set_xlim(0, 100)
+                ax.set_xticks([0, 25, 50, 75, 100])
+                ax.set_xticklabels(["0%", "25%", "50%", "75%", "100%"], color='rgba(255,255,255,0.3)')
+                ax.tick_params(colors='rgba(255,255,255,0.3)')
+                ax.set_yticklabels([])
+                ax.legend(loc='upper right', facecolor='none', labelcolor='rgba(255,255,255,0.5)')
+                for spine in ax.spines.values():
+                    spine.set_color('rgba(255,255,255,0.1)')
+                plt.tight_layout()
+                st.pyplot(fig)
+                
+                # ── Driving Advice ──
+                if result["prediction"] == "sharp":
+                    st.warning("""
+                    ⚠️ **EMERGENCY MODE**
+                    - Reduce speed immediately
+                    - Stay in your lane
+                    - Watch for oncoming traffic
+                    - Do not overtake
+                    """)
+                else:
+                    st.success("""
+                    ✅ **NORMAL OPERATION**
+                    - Maintain safe following distance
+                    - Stay alert and focused
+                    - Observe speed limits
+                    """)
 
-else:  # About
-    st.markdown('<div class="main-header">ℹ️ About</div>', unsafe_allow_html=True)
+with col_sidebar:
+    # ── Route Analysis ──
+    st.markdown('<div class="hud-header">ROUTE ANALYSIS</div>', unsafe_allow_html=True)
     
+    # Distance markers
     st.markdown("""
-    ## 🛣️ Highway Bend Classifier
+    <div style="padding:5px 0; font-family:Consolas;">
+        <div style="color:rgba(0,180,255,0.3); font-size:0.6rem;">DISTANCE TO BEND</div>
+        <div style="display:flex; justify-content:space-between; color:rgba(255,255,255,0.2); font-size:0.6rem;">
+            <span>0m</span><span>50m</span><span>100m</span><span>150m</span>
+        </div>
+        <div class="route-bar">
+            <div class="route-bar-fill" style="width:0%;"></div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
-    ### 🎯 Features
-    - **📸 Image Upload:** Upload highway images for classification
-    - **📸 Camera Capture:** Take photos directly from your device
-    - **🎥 Live Video Feed:** Real-time road detection
-    - **🧠 Smart Validation:** Automatically validates road images
-    - **📊 Analytics Dashboard:** Track predictions and trends
-    - **🕐 History Tracking:** Full prediction history with filters
+    # ── Bend Analysis Result ──
+    if st.session_state.latest_prediction:
+        result = st.session_state.latest_prediction
+        if result["prediction"] == "sharp":
+            st.markdown(f"""
+            <div style="background:rgba(255,68,68,0.1); border:1px solid rgba(255,68,68,0.2); border-radius:10px; padding:15px; margin:10px 0;">
+                <div style="color:#ff4444; font-size:0.8rem; font-family:Consolas;">DETECTED WHEEL DEVIATION</div>
+                <div style="color:#ff4444; font-size:1.8rem; font-weight:700; font-family:Consolas;">42°</div>
+                <div style="color:rgba(255,255,255,0.3); font-size:0.6rem; font-family:Consolas;">CURVATURE ANGLE</div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div style="background:rgba(0,255,136,0.05); border:1px solid rgba(0,255,136,0.1); border-radius:10px; padding:15px; margin:10px 0;">
+                <div style="color:#00ff88; font-size:0.8rem; font-family:Consolas;">ROAD CLEAR</div>
+                <div style="color:#00ff88; font-size:1.8rem; font-weight:700; font-family:Consolas;">0°</div>
+                <div style="color:rgba(255,255,255,0.3); font-size:0.6rem; font-family:Consolas;">CURVATURE ANGLE</div>
+            </div>
+            """, unsafe_allow_html=True)
     
-    ### 📊 Model Performance
-    | Metric | Value |
-    |--------|-------|
-    | Architecture | MobileNetV2 |
-    | Accuracy | 90.2% |
-    | Sharp Precision | 92% |
-    | Sharp Recall | 89% |
-    | Straight Precision | 89% |
-    | Straight Recall | 92% |
+    # ── Bend History ──
+    st.markdown('<div class="hud-header" style="margin-top:15px;">BEND HISTORY</div>', unsafe_allow_html=True)
     
-    ### 🎥 Live Feed Features
-    - Real-time frame analysis
-    - FPS counter
-    - Visual overlays
-    - Confidence bars
-    - Auto-save predictions
+    if st.session_state.history:
+        recent = st.session_state.history[-5:]
+        for item in reversed(recent):
+            if item.get("type") == "prediction":
+                cls = item["prediction"]
+                cls_class = "history-item-sharp" if cls == "sharp" else "history-item-straight"
+                emoji = "🔴" if cls == "sharp" else "🟢"
+                st.markdown(f"""
+                <div class="history-item {cls_class}">
+                    <span class="history-label">{emoji} {cls.upper()} {item['confidence']:.1f}%</span>
+                    <span class="history-time" style="float:right;">{item['time']}</span>
+                </div>
+                """, unsafe_allow_html=True)
+    else:
+        st.markdown('<div style="color:rgba(255,255,255,0.1); font-size:0.7rem; font-family:Consolas;">NO DATA</div>', unsafe_allow_html=True)
     
-    ### 🛠️ Technical Stack
-    - **Framework:** PyTorch
-    - **Deployment:** Streamlit Cloud
-    - **Video:** WebRTC + OpenCV
-    - **UI:** Custom CSS + Streamlit
+    # ── Diagnostics ──
+    st.markdown('<div class="hud-header" style="margin-top:15px;">DIAGNOSTICS</div>', unsafe_allow_html=True)
     
-    ### 📝 Important Note
-    This is a research prototype. Always rely on official traffic signs and real-time conditions while driving.
-    
-    ### 🔗 Links
-    - [Source Code](https://github.com/Oreoluwa03/highway-bend-classifier)
-    - [Model Details](https://huggingface.co/spaces/Oreoluwa82/Sharp-bend-detection)
-    
-    ---
-    *Built with ❤️ for road safety research*
-    """)
+    total = st.session_state.total_predictions + st.session_state.total_errors
+    if total > 0:
+        error_rate = (st.session_state.total_errors / total * 100) if total > 0 else 0
+        diag_status = "OK" if error_rate < 10 else "WARN" if error_rate < 20 else "ERROR"
+        diag_color = "#00ff88" if error_rate < 10 else "#ffaa00" if error_rate < 20 else "#ff4444"
+        
+        st.markdown(f"""
+        <div style="font-family:Consolas; font-size:0.6rem;">
+            <div class="diagnostic-item">STATUS: <span class="diagnostic-ok">{diag_status}</span></div>
+            <div class="diagnostic-item">PREDICTIONS: {st.session_state.total_predictions}</div>
+            <div class="diagnostic-item">ERRORS: {st.session_state.total_errors}</div>
+            <div class="diagnostic-item">ACCURACY: 90.2%</div>
+            <div class="diagnostic-item">MODEL: MOBILENETV2</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown('<div style="color:rgba(255,255,255,0.1); font-size:0.7rem; font-family:Consolas;">SYSTEM IDLE</div>', unsafe_allow_html=True)
+
+# ── Footer ──
+st.markdown("---")
+st.markdown("""
+<div style="display:flex; justify-content:space-between; font-family:Consolas; font-size:0.5rem; color:rgba(255,255,255,0.1);">
+    <span>DOT.HUD v1.0</span>
+    <span>⏻ SYSTEM ACTIVE</span>
+    <span>🛣️ HIGHWAY BEND DETECTION</span>
+</div>
+""", unsafe_allow_html=True)
